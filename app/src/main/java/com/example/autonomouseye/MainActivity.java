@@ -1,5 +1,6 @@
 package com.example.autonomouseye;
 
+import android.net.Uri;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.EditText;
@@ -7,35 +8,46 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.media3.common.MediaItem;
-import androidx.media3.common.PlaybackException;
-import androidx.media3.common.Player;
-import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.exoplayer.rtsp.RtspMediaSource;
-import androidx.media3.ui.PlayerView;
+
+import org.videolan.libvlc.LibVLC;
+import org.videolan.libvlc.Media;
+import org.videolan.libvlc.MediaPlayer;
+import org.videolan.libvlc.util.VLCVideoLayout;
+
+import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
 
-    private ExoPlayer player;
-    private PlayerView playerView;
+    private LibVLC libVLC;
+    private MediaPlayer mediaPlayer;
+    private VLCVideoLayout videoLayout;
     private EditText urlInput;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        ArrayList<String> options = new ArrayList<>();
+        options.add("--rtsp-tcp");
+        options.add("--network-caching=1500");
+        options.add("--no-drop-late-frames");
+        options.add("--no-skip-frames");
+
+        libVLC = new LibVLC(this, options);
+        mediaPlayer = new MediaPlayer(libVLC);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24, 24, 24, 24);
 
         TextView title = new TextView(this);
-        title.setText("AutonomousEye — RTSP");
+        title.setText("AutonomousEye — libVLC");
         title.setTextSize(20);
         root.addView(title);
 
         urlInput = new EditText(this);
-        urlInput.setHint("rtsp://admin:123456@192.168.1.100:554");
-        urlInput.setText("rtsp://admin:123456@192.168.1.100:554");
+        urlInput.setHint("rtsp://admin:123456@192.168.0.112:554/0/av1");
+        urlInput.setText("rtsp://admin:123456@192.168.0.112:554/0/av1");
         root.addView(urlInput);
 
         Button playBtn = new Button(this);
@@ -46,37 +58,27 @@ public class MainActivity extends AppCompatActivity {
         stopBtn.setText("Стоп");
         root.addView(stopBtn);
 
-        playerView = new PlayerView(this);
+        videoLayout = new VLCVideoLayout(this);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        playerView.setLayoutParams(lp);
-        root.addView(playerView);
+        videoLayout.setLayoutParams(lp);
+        root.addView(videoLayout);
 
         setContentView(root);
 
-        player = new ExoPlayer.Builder(this).build();
-        playerView.setPlayer(player);
-
-        player.addListener(new Player.Listener() {
-            @Override
-            public void onPlayerError(PlaybackException error) {
-                urlInput.setError(error.getMessage());
-            }
-        });
+        mediaPlayer.attachViews(videoLayout, null, false, false);
 
         playBtn.setOnClickListener(v -> playStream(urlInput.getText().toString()));
-        stopBtn.setOnClickListener(v -> player.stop());
+        stopBtn.setOnClickListener(v -> mediaPlayer.stop());
     }
 
     private void playStream(String url) {
         try {
-            player.stop();
-            RtspMediaSource rtsp = new RtspMediaSource.Factory()
-                    .setForceUseRtpTcp(true)
-                    .createMediaSource(MediaItem.fromUri(url));
-            player.setMediaSource(rtsp);
-            player.prepare();
-            player.play();
+            Media media = new Media(libVLC, Uri.parse(url));
+            media.setHWDecoderEnabled(true, false);
+            mediaPlayer.setMedia(media);
+            media.release();
+            mediaPlayer.play();
         } catch (Exception e) {
             urlInput.setError(e.getMessage());
         }
@@ -85,12 +87,16 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
-        if (player != null) player.pause();
+        if (mediaPlayer != null) mediaPlayer.pause();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (player != null) player.release();
+        if (mediaPlayer != null) {
+            mediaPlayer.stop();
+            mediaPlayer.release();
+        }
+        if (libVLC != null) libVLC.release();
     }
 }
