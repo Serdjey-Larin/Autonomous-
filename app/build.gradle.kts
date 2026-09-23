@@ -24,4 +24,5 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.videolan.android:libvlc-all:3.6.0")
     implementation("com.google.mlkit:image-labeling:17.0.8")
+    implementation("com.google.mlkit:face-detection:16.1.7")
 }
