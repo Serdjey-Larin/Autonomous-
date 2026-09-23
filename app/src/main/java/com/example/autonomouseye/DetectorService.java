@@ -16,7 +16,6 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
 import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.face.Face;
 import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
@@ -28,18 +27,20 @@ import org.videolan.libvlc.MediaPlayer;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 
 public class DetectorService extends Service {
 
     private static final String CHANNEL_ID = "detector_service";
     private static final int NOTIFICATION_ID = 1;
-    private static final int INTERVAL_MS = 5000;       // проверка каждые 5 сек
-    private static final long COOLDOWN_MS = 15000;     // не чаще записи раз в 15 сек
+    private static final int INTERVAL_MS = 5000;
+    private static final long COOLDOWN_MS = 15000;
 
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
@@ -48,6 +49,9 @@ public class DetectorService extends Service {
     private boolean running = false;
     private long lastSavedAt = 0L;
     private String rtspUrl = "rtsp://admin:123456@192.168.0.112:554/0/av1";
+    private String cameraIp = "192.168.0.112";
+    private String cameraUser = "admin";
+    private String cameraPass = "123456";
 
     @Override
     public void onCreate() {
@@ -59,7 +63,7 @@ public class DetectorService extends Service {
         options.add("--rtsp-tcp");
         options.add("--network-caching=1500");
         options.add("--no-audio");
-        options.add("--vout=dummy"); // без вывода видео (для экономии)
+        options.add("--vout=dummy");
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
@@ -77,14 +81,28 @@ public class DetectorService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && intent.hasExtra("rtsp_url")) {
             rtspUrl = intent.getStringExtra("rtsp_url");
+            parseRtspUrl(rtspUrl);
         }
         if (!running) {
             running = true;
             playStream();
-            // Задержка перед первым снимком, чтобы поток успел стартовать
             handler.postDelayed(detectionLoop, 5000);
         }
         return START_STICKY;
+    }
+
+    private void parseRtspUrl(String url) {
+        try {
+            // rtsp://user:pass@IP:port/...
+            String withoutScheme = url.replace("rtsp://", "");
+            String creds = withoutScheme.substring(0, withoutScheme.indexOf('@'));
+            String rest = withoutScheme.substring(withoutScheme.indexOf('@') + 1);
+            cameraUser = creds.substring(0, creds.indexOf(':'));
+            cameraPass = creds.substring(creds.indexOf(':') + 1);
+            cameraIp = rest.substring(0, rest.indexOf(':'));
+        } catch (Exception e) {
+            // оставляем дефолтные значения
+        }
     }
 
     private void playStream() {
@@ -93,9 +111,9 @@ public class DetectorService extends Service {
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
-            updateNotification("Камера: поток идёт");
+            updateNotification("Камера: RTSP-соединение установлено");
         } catch (Exception e) {
-            updateNotification("Ошибка: " + e.getMessage());
+            updateNotification("Ошибка RTSP: " + e.getMessage());
         }
     }
 
@@ -109,14 +127,12 @@ public class DetectorService extends Service {
     };
 
     private void captureAndDetect() {
-        try {
-            File snapshotFile = new File(getExternalFilesDir(null), "temp_snapshot.png");
-            boolean ok = mediaPlayer.takeSnapshot(0, snapshotFile.getAbsolutePath());
-            if (!ok) return;
-
-            Bitmap bitmap = BitmapFactory.decodeFile(snapshotFile.getAbsolutePath());
-            if (bitmap == null) return;
-
+        new Thread(() -> {
+            Bitmap bitmap = fetchSnapshot();
+            if (bitmap == null) {
+                updateNotification("Снимок недоступен (проверьте snapshot URL)");
+                return;
+            }
             InputImage image = InputImage.fromBitmap(bitmap, 0);
             faceDetector.process(image)
                     .addOnSuccessListener(faces -> {
@@ -133,9 +149,46 @@ public class DetectorService extends Service {
                         }
                     })
                     .addOnFailureListener(e -> { /* пропускаем кадр */ });
-        } catch (Exception e) {
-            // игнорируем сбой одного кадра
+        }).start();
+    }
+
+    /** Пробуем несколько типовых HTTP-адресов снимков. */
+    private Bitmap fetchSnapshot() {
+        String[] urls = {
+                "http://" + cameraUser + ":" + cameraPass + "@" + cameraIp + "/snapshot.jpg",
+                "http://" + cameraUser + ":" + cameraPass + "@" + cameraIp + "/cgi-bin/snapshot.cgi",
+                "http://" + cameraUser + ":" + cameraPass + "@" + cameraIp + "/tmpfs/auto.jpg",
+                "http://" + cameraUser + ":" + cameraPass + "@" + cameraIp + "/snap.jpg",
+                "http://" + cameraUser + ":" + cameraPass + "@" + cameraIp + ":8080/snapshot.jpg",
+        };
+        for (String u : urls) {
+            Bitmap b = tryFetch(u);
+            if (b != null) return b;
         }
+        return null;
+    }
+
+    private Bitmap tryFetch(String urlStr) {
+        HttpURLConnection conn = null;
+        try {
+            URL u = new URL(urlStr);
+            conn = (HttpURLConnection) u.openConnection();
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(2500);
+            conn.setDoInput(true);
+            conn.connect();
+            if (conn.getResponseCode() == 200) {
+                InputStream is = conn.getInputStream();
+                Bitmap bmp = BitmapFactory.decodeStream(is);
+                is.close();
+                return bmp;
+            }
+        } catch (Exception e) {
+            // пробуем следующий
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return null;
     }
 
     private void saveEvent(Bitmap bitmap, int faceCount) {
@@ -174,9 +227,7 @@ public class DetectorService extends Service {
                         .setAutoCancel(true);
 
         NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm != null) {
-            nm.notify((int) System.currentTimeMillis(), builder.build());
-        }
+        if (nm != null) nm.notify((int) System.currentTimeMillis(), builder.build());
     }
 
     private Notification buildNotification(String text) {
