@@ -1,33 +1,27 @@
 package com.example.autonomouseye;
 
-import android.Manifest;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
-import androidx.core.content.ContextCompat;
 
 import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.label.ImageLabel;
-import com.google.mlkit.vision.label.ImageLabeler;
-import com.google.mlkit.vision.label.ImageLabeling;
-import com.google.mlkit.vision.label.defaults.ImageLabelerOptions;
+import com.google.mlkit.vision.face.Face;
+import com.google.mlkit.vision.face.FaceDetection;
+import com.google.mlkit.vision.face.FaceDetector;
+import com.google.mlkit.vision.face.FaceDetectorOptions;
 
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
@@ -35,25 +29,24 @@ import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.util.VLCVideoLayout;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
+    private OverlayView overlay;
     private EditText urlInput;
-    private ImageLabeler labeler;
+    private FaceDetector faceDetector;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean detectionRunning = false;
-    private static final int DETECTION_INTERVAL_MS = 10000;
+    private static final int INTERVAL_MS = 1500; // каждые 1.5 сек
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        createNotificationChannel();
-        requestNotificationPermission();
 
         ArrayList<String> options = new ArrayList<>();
         options.add("--rtsp-tcp");
@@ -62,18 +55,21 @@ public class MainActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        labeler = ImageLabeling.getClient(
-                new ImageLabelerOptions.Builder()
-                        .setConfidenceThreshold(0.7f)
-                        .build()
-        );
+        FaceDetectorOptions faceOpts = new FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setMinFaceSize(0.1f)
+                .build();
+        faceDetector = FaceDetection.getClient(faceOpts);
 
+        // ---- UI ----
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24, 24, 24, 24);
 
         TextView title = new TextView(this);
-        title.setText("AutonomousEye — детектор");
+        title.setText("AutonomousEye — Face Box");
         title.setTextSize(20);
         root.addView(title);
 
@@ -86,19 +82,31 @@ public class MainActivity extends AppCompatActivity {
         root.addView(playBtn);
 
         Button detectBtn = new Button(this);
-        detectBtn.setText("Старт детектор");
+        detectBtn.setText("Старт детектор лиц");
         root.addView(detectBtn);
 
         Button stopBtn = new Button(this);
         stopBtn.setText("Стоп");
         root.addView(stopBtn);
 
-        videoLayout = new VLCVideoLayout(this);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+        // Контейнер для видео + overlay
+        FrameLayout videoContainer = new FrameLayout(this);
+        LinearLayout.LayoutParams containerLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        videoLayout.setLayoutParams(lp);
-        root.addView(videoLayout);
+        videoContainer.setLayoutParams(containerLp);
 
+        videoLayout = new VLCVideoLayout(this);
+        videoContainer.addView(videoLayout, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        overlay = new OverlayView(this);
+        overlay.setBackgroundColor(0x00000000); // прозрачный
+        videoContainer.addView(overlay, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        root.addView(videoContainer);
         setContentView(root);
 
         mediaPlayer.attachViews(videoLayout, null, false, false);
@@ -108,6 +116,7 @@ public class MainActivity extends AppCompatActivity {
         stopBtn.setOnClickListener(v -> {
             stopDetection();
             mediaPlayer.stop();
+            overlay.clear();
         });
     }
 
@@ -126,42 +135,49 @@ public class MainActivity extends AppCompatActivity {
     private void startDetection() {
         if (detectionRunning) return;
         detectionRunning = true;
-        Toast.makeText(this, "Детектор включён", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Детектор лиц включён", Toast.LENGTH_SHORT).show();
         handler.post(detectionLoop);
     }
 
     private void stopDetection() {
         detectionRunning = false;
         handler.removeCallbacks(detectionLoop);
+        overlay.clear();
     }
 
     private final Runnable detectionLoop = new Runnable() {
         @Override
         public void run() {
             if (!detectionRunning) return;
-            analyzeFrame();
-            handler.postDelayed(this, DETECTION_INTERVAL_MS);
+            processFrame();
+            handler.postDelayed(this, INTERVAL_MS);
         }
     };
 
-    private void analyzeFrame() {
+    private void processFrame() {
         Bitmap bitmap = captureFrame();
         if (bitmap == null) return;
 
         InputImage image = InputImage.fromBitmap(bitmap, 0);
-        labeler.process(image)
-                .addOnSuccessListener(labels -> {
-                    for (ImageLabel label : labels) {
-                        String text = label.getText();
-                        float conf = label.getConfidence();
-                        if (("Person".equalsIgnoreCase(text) || "Human".equalsIgnoreCase(text))
-                                && conf > 0.7f) {
-                            showDetectionNotification(bitmap, conf, text);
-                            break;
-                        }
+        faceDetector.process(image)
+                .addOnSuccessListener(faces -> {
+                    List<RectF> boxes = new ArrayList<>();
+                    for (Face face : faces) {
+                        Rect b = face.getBoundingBox();
+                        // Масштабируем из координат bitmap в координаты View
+                        float scaleX = (float) overlay.getWidth() / bitmap.getWidth();
+                        float scaleY = (float) overlay.getHeight() / bitmap.getHeight();
+                        RectF scaled = new RectF(
+                                b.left * scaleX,
+                                b.top * scaleY,
+                                b.right * scaleX,
+                                b.bottom * scaleY
+                        );
+                        boxes.add(scaled);
                     }
+                    overlay.setBoxes(boxes);
                 })
-                .addOnFailureListener(e -> { /* пропускаем */ });
+                .addOnFailureListener(e -> { /* пропускаем кадр */ });
     }
 
     private Bitmap captureFrame() {
@@ -175,40 +191,6 @@ public class MainActivity extends AppCompatActivity {
             return bmp;
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    private void showDetectionNotification(Bitmap preview, float confidence, String label) {
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "detect_channel")
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentTitle("Обнаружено: " + label)
-                .setContentText("Уверенность: " + Math.round(confidence * 100) + "%")
-                .setStyle(new NotificationCompat.BigPictureStyle().bigPicture(preview))
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true);
-
-        NotificationManagerCompat.from(this).notify((int) System.currentTimeMillis(), builder.build());
-    }
-
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                    "detect_channel",
-                    "Детекция объектов",
-                    NotificationManager.IMPORTANCE_HIGH
-            );
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(channel);
-        }
-    }
-
-    private void requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
-            }
         }
     }
 
