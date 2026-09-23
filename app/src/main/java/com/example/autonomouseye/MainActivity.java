@@ -1,4 +1,3 @@
-```java
 package com.example.autonomouseye;
 
 import android.os.Bundle;
