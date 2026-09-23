@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.autonomouseye"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -22,7 +22,5 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-exoplayer-rtsp:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("org.videolan.android:libvlc-all:3.6.0")
 }
