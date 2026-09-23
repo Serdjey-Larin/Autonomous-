@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.util.AttributeSet;
 import android.view.View;
 
 import java.util.ArrayList;
@@ -17,6 +18,20 @@ public class OverlayView extends View {
 
     public OverlayView(Context context) {
         super(context);
+        init();
+    }
+
+    public OverlayView(Context context, AttributeSet attrs) {
+        super(context, attrs);
+        init();
+    }
+
+    public OverlayView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        init();
+    }
+
+    private void init() {
         paint = new Paint();
         paint.setColor(Color.parseColor("#00FF88"));
         paint.setStyle(Paint.Style.STROKE);
