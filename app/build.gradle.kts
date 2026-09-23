@@ -1,6 +1,5 @@
-```kotlin
 plugins {
-    id("com.android.application") version "8.1.4"
+    id("com.android.application")
 }
 
 android {
@@ -24,4 +23,3 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 }
-```
