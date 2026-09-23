@@ -63,7 +63,11 @@ public class MainActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        labeler = ImageLabeling.getClient(ImageLabelerOptionsImpl.DEFAULT);
+        labeler = ImageLabeling.getClient(
+        new com.google.mlkit.vision.labeling.defaults.ImageLabelerOptions.Builder()
+                .setConfidenceThreshold(0.7f)
+                .build()
+);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
