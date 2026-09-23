@@ -5,7 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,16 +24,16 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.labeling.ImageLabel;
-import com.google.mlkit.vision.labeling.ImageLabeler;
-import com.google.mlkit.vision.labeling.ImageLabeling;
+import com.google.mlkit.vision.label.ImageLabel;
+import com.google.mlkit.vision.label.ImageLabeler;
+import com.google.mlkit.vision.label.ImageLabeling;
+import com.google.mlkit.vision.label.defaults.ImageLabelerOptions;
 
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.util.VLCVideoLayout;
 
-import java.io.File;
 import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
@@ -46,8 +46,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean detectionRunning = false;
-    private int snapshotCounter = 0;
-    private static final int DETECTION_INTERVAL_MS = 10000; // каждые 10 сек
+    private static final int DETECTION_INTERVAL_MS = 10000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,10 +63,10 @@ public class MainActivity extends AppCompatActivity {
         mediaPlayer = new MediaPlayer(libVLC);
 
         labeler = ImageLabeling.getClient(
-        new com.google.mlkit.vision.labeling.defaults.ImageLabelerOptions.Builder()
-                .setConfidenceThreshold(0.7f)
-                .build()
-);
+                new ImageLabelerOptions.Builder()
+                        .setConfidenceThreshold(0.7f)
+                        .build()
+        );
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -140,63 +139,51 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void run() {
             if (!detectionRunning) return;
-            takeSnapshotAndDetect();
+            analyzeFrame();
             handler.postDelayed(this, DETECTION_INTERVAL_MS);
         }
     };
 
-    private void takeSnapshotAndDetect() {
-        try {
-            snapshotCounter++;
-            File outFile = new File(getExternalFilesDir(null),
-                    "snap_" + snapshotCounter + ".png");
-            String path = outFile.getAbsolutePath();
-
-            boolean queued = mediaPlayer.takeSnapshot(0, path);
-            if (!queued) return;
-
-            // Ждём 800 мс, пока libVLC сохранит PNG
-            handler.postDelayed(() -> analyzeSnapshot(outFile), 800);
-        } catch (Exception e) {
-            // игнорируем сбои одного кадра
-        }
-    }
-
-    private void analyzeSnapshot(File file) {
-        if (!file.exists() || file.length() == 0) return;
-
-        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+    private void analyzeFrame() {
+        Bitmap bitmap = captureFrame();
         if (bitmap == null) return;
 
         InputImage image = InputImage.fromBitmap(bitmap, 0);
         labeler.process(image)
                 .addOnSuccessListener(labels -> {
-                    boolean personFound = false;
-                    float maxConf = 0f;
                     for (ImageLabel label : labels) {
-                        if ("Person".equalsIgnoreCase(label.getText())
-                                && label.getConfidence() > 0.7f) {
-                            personFound = true;
-                            maxConf = label.getConfidence();
+                        String text = label.getText();
+                        float conf = label.getConfidence();
+                        if (("Person".equalsIgnoreCase(text) || "Human".equalsIgnoreCase(text))
+                                && conf > 0.7f) {
+                            showDetectionNotification(bitmap, conf, text);
                             break;
                         }
                     }
-                    if (personFound) {
-                        showDetectionNotification(file, maxConf);
-                    }
                 })
-                .addOnFailureListener(e -> { /* пропускаем кадр */ });
+                .addOnFailureListener(e -> { /* пропускаем */ });
     }
 
-    private void showDetectionNotification(File photo, float confidence) {
-        Bitmap preview = BitmapFactory.decodeFile(photo.getAbsolutePath());
+    private Bitmap captureFrame() {
+        try {
+            int w = videoLayout.getWidth();
+            int h = videoLayout.getHeight();
+            if (w <= 0 || h <= 0) return null;
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bmp);
+            videoLayout.draw(canvas);
+            return bmp;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
+    private void showDetectionNotification(Bitmap preview, float confidence, String label) {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "detect_channel")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentTitle("Обнаружен человек!")
+                .setContentTitle("Обнаружено: " + label)
                 .setContentText("Уверенность: " + Math.round(confidence * 100) + "%")
-                .setStyle(new NotificationCompat.BigPictureStyle()
-                        .bigPicture(preview))
+                .setStyle(new NotificationCompat.BigPictureStyle().bigPicture(preview))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true);
 
