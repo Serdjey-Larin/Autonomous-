@@ -9,10 +9,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         TextView tv = new TextView(this);
-        tv.setText("AutonomousEye\nEnvironment Ready!");
+        tv.setText("AutonomousEye готов!");
         tv.setTextSize(22);
         tv.setPadding(48, 48, 48, 48);
         setContentView(tv);
     }
 }
-```
