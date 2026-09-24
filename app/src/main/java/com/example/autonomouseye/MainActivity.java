@@ -111,7 +111,6 @@ public class MainActivity extends AppCompatActivity {
                 .build();
         faceDetector = FaceDetection.getClient(faceOpts);
 
-        // Только безопасные опции, не ломающие инициализацию libVLC
         ArrayList<String> options = new ArrayList<>();
         options.add("--rtsp-tcp");
         options.add("--network-caching=1500");
@@ -119,7 +118,6 @@ public class MainActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        // SurfaceView — для PixelCopy
         videoLayout.post(() -> {
             try {
                 mediaPlayer.attachViews(videoLayout, null, false, false);
@@ -229,7 +227,6 @@ public class MainActivity extends AppCompatActivity {
         try {
             lastUrl = url;
             Media media = new Media(libVLC, Uri.parse(url));
-            // Безопасное отключение HW-декодера → работает PixelCopy
             media.setHWDecoderEnabled(false, false);
             mediaPlayer.setMedia(media);
             media.release();
@@ -261,10 +258,7 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    // ============ ЗАХВАТ КАДРА ============
-
     private void captureFrame(Consumer<Bitmap> callback) {
-        // 1. PixelCopy через SurfaceView — самый надёжный
         SurfaceView surfaceView = findSurfaceView(videoLayout);
         if (surfaceView != null
                 && surfaceView.getWidth() > 0
@@ -289,7 +283,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 2. Фолбэк: TextureView.getBitmap()
         TextureView textureView = findTextureView(videoLayout);
         if (textureView != null && textureView.isAvailable()) {
             Bitmap bmp = textureView.getBitmap();
