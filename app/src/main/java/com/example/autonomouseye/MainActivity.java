@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.net.Uri;
@@ -14,7 +13,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -52,7 +53,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_URL =
             "rtsp://admin:123456@192.168.0.112:554/0/av1";
 
-    // ====== НАСТРОЙКИ MQTT ======
     private static final String MQTT_BROKER =
             "ssl://o66f8ec6.ala.eu-central-1.emqxsl.com:8883";
     private static final String MQTT_USER = "Eye";
@@ -134,6 +134,7 @@ public class MainActivity extends AppCompatActivity {
         Button detectBtn = findViewById(R.id.detect_btn);
         Button serviceBtn = findViewById(R.id.service_btn);
         Button statsBtn = findViewById(R.id.stats_btn);
+        Button snapshotBtn = findViewById(R.id.snapshot_btn);
 
         playBtn.setOnClickListener(v -> {
             String url = urlInput.getText().toString();
@@ -167,15 +168,12 @@ public class MainActivity extends AppCompatActivity {
 
         statsBtn.setOnClickListener(v -> showStats());
 
-        Button snapshotBtn = findViewById(R.id.snapshot_btn);
         if (snapshotBtn != null) {
             snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
         }
 
-        // Инициализация MQTT
         initMqtt();
 
-        // Автозапуск
         startDetectorService(savedUrl);
         handler.postDelayed(() -> playStream(savedUrl), 1500);
     }
@@ -196,8 +194,6 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onDisconnected() {
                     Log.d("MQTT", "Disconnected");
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                            "MQTT отключён", Toast.LENGTH_SHORT).show());
                 }
 
                 @Override
@@ -263,11 +259,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void processFrame() {
         Bitmap bitmap = captureFrame();
-        if (bitmap == null) return;
+        if (bitmap == null) {
+            Log.d("FACE", "captureFrame вернул null");
+            return;
+        }
 
         InputImage image = InputImage.fromBitmap(bitmap, 0);
         faceDetector.process(image)
                 .addOnSuccessListener(faces -> {
+                    Log.d("FACE", "Найдено лиц: " + faces.size());
                     List<RectF> boxes = new ArrayList<>();
                     float scaleX = (float) overlay.getWidth() / bitmap.getWidth();
                     float scaleY = (float) overlay.getHeight() / bitmap.getHeight();
@@ -283,8 +283,6 @@ public class MainActivity extends AppCompatActivity {
                     overlay.setBoxes(boxes);
                     if (!boxes.isEmpty()) {
                         statusText.setText("Лиц в кадре: " + boxes.size());
-
-                        // Публикуем событие в MQTT (не чаще 1 раза в 10 сек)
                         long now = System.currentTimeMillis();
                         if (now - lastMqttPublish > MQTT_COOLDOWN_MS) {
                             lastMqttPublish = now;
@@ -292,7 +290,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 })
-                .addOnFailureListener(e -> { });
+                .addOnFailureListener(e -> Log.e("FACE", "ML Kit error", e));
     }
 
     private void publishFaceEvent(int count) {
@@ -300,21 +298,39 @@ public class MainActivity extends AppCompatActivity {
         String payload = "{\"count\":" + count
                 + ",\"time\":\"" + new Date().toString() + "\"}";
         mqttManager.publish(TOPIC_EVENT, payload, 1, false);
-        Log.d("MQTT", "Published: " + payload);
     }
 
+    /**
+     * Захват кадра.
+     * TextureView НЕ поддерживает draw(Canvas),
+     * поэтому используем TextureView.getBitmap().
+     */
     private Bitmap captureFrame() {
         try {
-            int w = videoLayout.getWidth();
-            int h = videoLayout.getHeight();
-            if (w <= 0 || h <= 0) return null;
-            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(bmp);
-            videoLayout.draw(canvas);
-            return bmp;
+            TextureView textureView = findTextureView(videoLayout);
+            if (textureView != null && textureView.isAvailable()) {
+                Bitmap bmp = textureView.getBitmap();
+                if (bmp != null && bmp.getWidth() > 0 && bmp.getHeight() > 0) {
+                    return bmp;
+                }
+            }
         } catch (Exception e) {
-            return null;
+            Log.e("FACE", "captureFrame error", e);
         }
+        return null;
+    }
+
+    private TextureView findTextureView(ViewGroup parent) {
+        if (parent == null) return null;
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child instanceof TextureView) return (TextureView) child;
+            if (child instanceof ViewGroup) {
+                TextureView result = findTextureView((ViewGroup) child);
+                if (result != null) return result;
+            }
+        }
+        return null;
     }
 
     private void takeEnhancedSnapshot() {
@@ -370,10 +386,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateCounterOverlay() {
         try {
             File f = new File(getExternalFilesDir(null), "counters.txt");
-            if (!f.exists()) {
-                counterOverlay.setText("");
-                return;
-            }
+            if (!f.exists()) { counterOverlay.setText(""); return; }
             BufferedReader br = new BufferedReader(new FileReader(f));
             String line = br.readLine();
             br.close();
@@ -453,7 +466,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         stopDetection();
-        if (mqttManager != null) mqttManager.disconnect();
         if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.release(); }
         if (libVLC != null) libVLC.release();
         if (faceDetector != null) faceDetector.close();
