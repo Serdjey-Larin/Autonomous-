@@ -157,7 +157,8 @@ public class MainActivity extends AppCompatActivity {
             startDetectorService(url);
         });
 
-        statsBtn.setOnClickListener(v -> showStats());
+        Button snapshotBtn = findViewById(R.id.snapshot_btn);
+snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
 
         // АВТОЗАПУСК: сервис в фоне
         startDetectorService(savedUrl);
