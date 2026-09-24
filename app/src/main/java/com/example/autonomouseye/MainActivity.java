@@ -87,7 +87,8 @@ public class MainActivity extends AppCompatActivity {
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
-        mediaPlayer.attachViews(videoLayout, null, false, false);
+        // TRUE = использовать TextureView (нужно для захвата кадра)
+        mediaPlayer.attachViews(videoLayout, null, false, true);
 
         setStatus(false, "Отключено");
         updateCounterOverlay();
@@ -270,11 +271,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        // Перепривязываем видео к новому Surface после возврата
         if (mediaPlayer != null && videoLayout != null) {
             try {
                 mediaPlayer.detachViews();
-                mediaPlayer.attachViews(videoLayout, null, false, false);
+                // TRUE = TextureView
+                mediaPlayer.attachViews(videoLayout, null, false, true);
             } catch (Exception ignored) {}
         }
     }
@@ -282,7 +283,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Если поток был запущен — возобновляем воспроизведение
         if (mediaPlayer != null && mediaPlayer.getMedia() != null && !lastUrl.isEmpty()) {
             try {
                 mediaPlayer.play();
@@ -294,7 +294,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        // Отсоединяем Surface, но не останавливаем поток
         if (mediaPlayer != null) {
             try {
                 mediaPlayer.detachViews();
