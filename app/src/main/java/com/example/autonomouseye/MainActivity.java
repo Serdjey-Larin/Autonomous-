@@ -112,8 +112,12 @@ public class MainActivity extends AppCompatActivity {
         faceDetector = FaceDetection.getClient(faceOpts);
 
         ArrayList<String> options = new ArrayList<>();
-        options.add("--rtsp-tcp");
-        options.add("--network-caching=1500");
+options.add("--rtsp-tcp");
+options.add("--network-caching=1500");
+options.add("--no-hw-dec");                        // отключаем hw-decoder
+options.add("--vout=android_display");             // software-рендер в Surface
+options.add("--no-drop-late-frames");
+options.add("--no-skip-frames");
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
@@ -228,7 +232,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             lastUrl = url;
             Media media = new Media(libVLC, Uri.parse(url));
-            media.setHWDecoderEnabled(true, false);
+            media.setHWDecoderEnabled(false, false);
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
