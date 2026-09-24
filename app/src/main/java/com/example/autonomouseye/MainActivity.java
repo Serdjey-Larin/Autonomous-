@@ -13,6 +13,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.PixelCopy;
+import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
@@ -45,6 +47,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Consumer;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -79,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
     private String lastUrl = "";
     private long lastMqttPublish = 0;
     private static final long MQTT_COOLDOWN_MS = 10000;
+    private boolean firstFrameLogged = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -103,7 +107,7 @@ public class MainActivity extends AppCompatActivity {
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
                 .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
-                .setMinFaceSize(0.1f)
+                .setMinFaceSize(0.05f)
                 .build();
         faceDetector = FaceDetection.getClient(faceOpts);
 
@@ -114,9 +118,10 @@ public class MainActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
+        // SurfaceView — PixelCopy работает с ним надёжно
         videoLayout.post(() -> {
             try {
-                mediaPlayer.attachViews(videoLayout, null, false, true);
+                mediaPlayer.attachViews(videoLayout, null, false, false);
             } catch (Exception ignored) {}
         });
 
@@ -184,7 +189,6 @@ public class MainActivity extends AppCompatActivity {
             mqttManager.setListener(new MqttManager.MqttListener() {
                 @Override
                 public void onConnected() {
-                    Log.d("MQTT", "Connected");
                     runOnUiThread(() -> Toast.makeText(MainActivity.this,
                             "MQTT подключён", Toast.LENGTH_SHORT).show());
                     mqttManager.subscribe(TOPIC_BATTERY, 1);
@@ -193,12 +197,10 @@ public class MainActivity extends AppCompatActivity {
 
                 @Override
                 public void onDisconnected() {
-                    Log.d("MQTT", "Disconnected");
                 }
 
                 @Override
                 public void onMessageReceived(String topic, String payload) {
-                    Log.d("MQTT", topic + ": " + payload);
                     if (TOPIC_BATTERY.equals(topic)) {
                         runOnUiThread(() -> statusText.setText("АКБ: " + payload + " В"));
                     }
@@ -257,65 +259,56 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    private void processFrame() {
-        Bitmap bitmap = captureFrame();
-        if (bitmap == null) {
-            Log.d("FACE", "captureFrame вернул null");
-            return;
+    // ================= ЗАХВАТ КАДРА ЧЕРЕЗ PIXELCOPY =================
+
+    private void captureFrame(Consumer<Bitmap> callback) {
+        // Пробуем PixelCopy через SurfaceView — самый надёжный способ
+        SurfaceView surfaceView = findSurfaceView(videoLayout);
+        if (surfaceView != null
+                && surfaceView.getWidth() > 0
+                && surfaceView.getHeight() > 0
+                && surfaceView.getHolder().getSurface() != null
+                && surfaceView.getHolder().getSurface().isValid()) {
+            try {
+                Bitmap bmp = Bitmap.createBitmap(
+                        surfaceView.getWidth(), surfaceView.getHeight(),
+                        Bitmap.Config.ARGB_8888);
+                PixelCopy.request(surfaceView, bmp, copyResult -> {
+                    if (copyResult == PixelCopy.SUCCESS) {
+                        callback.accept(bmp);
+                    } else {
+                        Log.e("FACE", "PixelCopy failed: " + copyResult);
+                        callback.accept(null);
+                    }
+                }, handler);
+                return;
+            } catch (Exception e) {
+                Log.e("FACE", "PixelCopy exception", e);
+            }
         }
 
-        InputImage image = InputImage.fromBitmap(bitmap, 0);
-        faceDetector.process(image)
-                .addOnSuccessListener(faces -> {
-                    Log.d("FACE", "Найдено лиц: " + faces.size());
-                    List<RectF> boxes = new ArrayList<>();
-                    float scaleX = (float) overlay.getWidth() / bitmap.getWidth();
-                    float scaleY = (float) overlay.getHeight() / bitmap.getHeight();
-                    for (Face face : faces) {
-                        Rect b = face.getBoundingBox();
-                        boxes.add(new RectF(
-                                b.left * scaleX,
-                                b.top * scaleY,
-                                b.right * scaleX,
-                                b.bottom * scaleY
-                        ));
-                    }
-                    overlay.setBoxes(boxes);
-                    if (!boxes.isEmpty()) {
-                        statusText.setText("Лиц в кадре: " + boxes.size());
-                        long now = System.currentTimeMillis();
-                        if (now - lastMqttPublish > MQTT_COOLDOWN_MS) {
-                            lastMqttPublish = now;
-                            publishFaceEvent(boxes.size());
-                        }
-                    }
-                })
-                .addOnFailureListener(e -> Log.e("FACE", "ML Kit error", e));
-    }
-
-    private void publishFaceEvent(int count) {
-        if (mqttManager == null || !mqttManager.isConnected()) return;
-        String payload = "{\"count\":" + count
-                + ",\"time\":\"" + new Date().toString() + "\"}";
-        mqttManager.publish(TOPIC_EVENT, payload, 1, false);
-    }
-
-    /**
-     * Захват кадра.
-     * TextureView НЕ поддерживает draw(Canvas),
-     * поэтому используем TextureView.getBitmap().
-     */
-    private Bitmap captureFrame() {
-        try {
-            TextureView textureView = findTextureView(videoLayout);
-            if (textureView != null && textureView.isAvailable()) {
-                Bitmap bmp = textureView.getBitmap();
-                if (bmp != null && bmp.getWidth() > 0 && bmp.getHeight() > 0) {
-                    return bmp;
-                }
+        // Фолбэк: TextureView.getBitmap()
+        TextureView textureView = findTextureView(videoLayout);
+        if (textureView != null && textureView.isAvailable()) {
+            Bitmap bmp = textureView.getBitmap();
+            if (bmp != null && bmp.getWidth() > 0) {
+                callback.accept(bmp);
+                return;
             }
-        } catch (Exception e) {
-            Log.e("FACE", "captureFrame error", e);
+        }
+
+        callback.accept(null);
+    }
+
+    private SurfaceView findSurfaceView(ViewGroup parent) {
+        if (parent == null) return null;
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child instanceof SurfaceView) return (SurfaceView) child;
+            if (child instanceof ViewGroup) {
+                SurfaceView found = findSurfaceView((ViewGroup) child);
+                if (found != null) return found;
+            }
         }
         return null;
     }
@@ -326,45 +319,90 @@ public class MainActivity extends AppCompatActivity {
             View child = parent.getChildAt(i);
             if (child instanceof TextureView) return (TextureView) child;
             if (child instanceof ViewGroup) {
-                TextureView result = findTextureView((ViewGroup) child);
-                if (result != null) return result;
+                TextureView found = findTextureView((ViewGroup) child);
+                if (found != null) return found;
             }
         }
         return null;
     }
 
-    private void takeEnhancedSnapshot() {
-        Bitmap raw = captureFrame();
-        if (raw == null) {
-            Toast.makeText(this, "Кадр пуст — включите Play", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        Toast.makeText(this, "Обработка кадра...", Toast.LENGTH_SHORT).show();
-
-        new Thread(() -> {
-            Bitmap enhanced = ImageEnhancer.enhance(raw);
-            try {
-                File dir = new File(getExternalFilesDir(null), "events");
-                if (!dir.exists()) dir.mkdirs();
-                SimpleDateFormat sdf = new SimpleDateFormat(
-                        "yyyy-MM-dd_HH-mm-ss", Locale.getDefault());
-                String stamp = sdf.format(new Date());
-                File out = new File(dir, "snap_" + stamp + ".jpg");
-                FileOutputStream fos = new FileOutputStream(out);
-                enhanced.compress(Bitmap.CompressFormat.JPEG, 92, fos);
-                fos.flush();
-                fos.close();
-
-                runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "Сохранено: " + out.getName(),
-                        Toast.LENGTH_LONG).show());
-            } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "Ошибка: " + e.getMessage(),
-                        Toast.LENGTH_LONG).show());
+    private void processFrame() {
+        captureFrame(bitmap -> {
+            if (bitmap == null) {
+                if (!firstFrameLogged) {
+                    Log.e("FACE", "captureFrame вернул null");
+                }
+                return;
             }
-        }).start();
+            if (!firstFrameLogged) {
+                firstFrameLogged = true;
+                Log.d("FACE", "Первый кадр: " + bitmap.getWidth() + "x" + bitmap.getHeight());
+            }
+
+            InputImage image = InputImage.fromBitmap(bitmap, 0);
+            faceDetector.process(image)
+                    .addOnSuccessListener(faces -> {
+                        List<RectF> boxes = new ArrayList<>();
+                        float scaleX = (float) overlay.getWidth() / bitmap.getWidth();
+                        float scaleY = (float) overlay.getHeight() / bitmap.getHeight();
+                        for (Face face : faces) {
+                            Rect b = face.getBoundingBox();
+                            boxes.add(new RectF(
+                                    b.left * scaleX,
+                                    b.top * scaleY,
+                                    b.right * scaleX,
+                                    b.bottom * scaleY
+                            ));
+                        }
+                        overlay.setBoxes(boxes);
+                        if (!boxes.isEmpty()) {
+                            statusText.setText("Лиц в кадре: " + boxes.size());
+                            long now = System.currentTimeMillis();
+                            if (now - lastMqttPublish > MQTT_COOLDOWN_MS) {
+                                lastMqttPublish = now;
+                                publishFaceEvent(boxes.size());
+                            }
+                        }
+                    })
+                    .addOnFailureListener(e -> Log.e("FACE", "ML Kit", e));
+        });
+    }
+
+    private void publishFaceEvent(int count) {
+        if (mqttManager == null || !mqttManager.isConnected()) return;
+        String payload = "{\"count\":" + count
+                + ",\"time\":\"" + new Date().toString() + "\"}";
+        mqttManager.publish(TOPIC_EVENT, payload, 1, false);
+    }
+
+    private void takeEnhancedSnapshot() {
+        captureFrame(raw -> {
+            if (raw == null) {
+                Toast.makeText(this, "Кадр пуст", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(this, "Обработка...", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                Bitmap enhanced = ImageEnhancer.enhance(raw);
+                try {
+                    File dir = new File(getExternalFilesDir(null), "events");
+                    if (!dir.exists()) dir.mkdirs();
+                    SimpleDateFormat sdf = new SimpleDateFormat(
+                            "yyyy-MM-dd_HH-mm-ss", Locale.getDefault());
+                    String stamp = sdf.format(new Date());
+                    File out = new File(dir, "snap_" + stamp + ".jpg");
+                    FileOutputStream fos = new FileOutputStream(out);
+                    enhanced.compress(Bitmap.CompressFormat.JPEG, 92, fos);
+                    fos.flush();
+                    fos.close();
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "Сохранено: " + out.getName(), Toast.LENGTH_LONG).show());
+                } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "Ошибка: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                }
+            }).start();
+        });
     }
 
     private void startDetectorService(String url) {
@@ -434,7 +472,7 @@ public class MainActivity extends AppCompatActivity {
             videoLayout.post(() -> {
                 try {
                     mediaPlayer.detachViews();
-                    mediaPlayer.attachViews(videoLayout, null, false, true);
+                    mediaPlayer.attachViews(videoLayout, null, false, false);
                 } catch (Exception ignored) {}
             });
         }
