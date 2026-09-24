@@ -9,7 +9,6 @@ import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.IMqttToken;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
-import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
 import java.util.UUID;
@@ -91,8 +90,8 @@ public class MqttManager {
                     if (listener != null) listener.onError("Connect failed: " + exception.getMessage());
                 }
             });
-        } catch (MqttException e) {
-            Log.e(TAG, "MqttException", e);
+        } catch (Exception e) {
+            Log.e(TAG, "Connect error", e);
             if (listener != null) listener.onError(e.getMessage());
         }
     }
@@ -110,8 +109,8 @@ public class MqttManager {
                     Log.e(TAG, "Subscribe failed", exception);
                 }
             });
-        } catch (MqttException e) {
-            Log.e(TAG, "Subscribe MqttException", e);
+        } catch (Exception e) {
+            Log.e(TAG, "Subscribe error", e);
         }
     }
 
@@ -121,8 +120,8 @@ public class MqttManager {
             message.setQos(qos);
             message.setRetained(retained);
             client.publish(topic, message);
-        } catch (MqttException e) {
-            Log.e(TAG, "Publish MqttException", e);
+        } catch (Exception e) {
+            Log.e(TAG, "Publish error", e);
         }
     }
 
@@ -131,7 +130,7 @@ public class MqttManager {
             if (client != null && client.isConnected()) {
                 client.disconnect();
             }
-        } catch (MqttException e) {
+        } catch (Exception e) {
             Log.e(TAG, "Disconnect error", e);
         }
     }
