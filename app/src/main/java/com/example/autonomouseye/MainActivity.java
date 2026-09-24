@@ -36,9 +36,13 @@ import org.videolan.libvlc.util.VLCVideoLayout;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -97,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        // ВАЖНО: подключаем view ПОСЛЕ того, как он будет размечен
+        // Подключаем TextureView после того, как он разметится
         videoLayout.post(new Runnable() {
             @Override
             public void run() {
@@ -157,13 +161,18 @@ public class MainActivity extends AppCompatActivity {
             startDetectorService(url);
         });
 
+        statsBtn.setOnClickListener(v -> showStats());
+
+        // Кнопка "СНИМОК" — с улучшением (denoise + sharpen)
         Button snapshotBtn = findViewById(R.id.snapshot_btn);
-snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
+        if (snapshotBtn != null) {
+            snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
+        }
 
         // АВТОЗАПУСК: сервис в фоне
         startDetectorService(savedUrl);
 
-        // АВТОЗАПУСК: поток + детекция через 1.5 сек, чтобы view успел разметаться
+        // АВТОЗАПУСК: поток + детекция через 1.5 сек
         handler.postDelayed(() -> playStream(savedUrl), 1500);
     }
 
@@ -249,6 +258,44 @@ snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
         }
     }
 
+    /**
+     * Снимок с улучшением: median-фильтр + unsharp mask.
+     * Работает в фоновом потоке, результат сохраняется в /events/.
+     */
+    private void takeEnhancedSnapshot() {
+        Bitmap raw = captureFrame();
+        if (raw == null) {
+            Toast.makeText(this, "Кадр пуст — включите Play", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "Обработка кадра...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            Bitmap enhanced = ImageEnhancer.enhance(raw);
+            try {
+                File dir = new File(getExternalFilesDir(null), "events");
+                if (!dir.exists()) dir.mkdirs();
+                SimpleDateFormat sdf = new SimpleDateFormat(
+                        "yyyy-MM-dd_HH-mm-ss", Locale.getDefault());
+                String stamp = sdf.format(new Date());
+                File out = new File(dir, "snap_" + stamp + ".jpg");
+                FileOutputStream fos = new FileOutputStream(out);
+                enhanced.compress(Bitmap.CompressFormat.JPEG, 92, fos);
+                fos.flush();
+                fos.close();
+
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Сохранено: " + out.getName(),
+                        Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Ошибка: " + e.getMessage(),
+                        Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
     private void startDetectorService(String url) {
         try {
             Intent intent = new Intent(this, DetectorService.class);
@@ -268,7 +315,10 @@ snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
     private void updateCounterOverlay() {
         try {
             File f = new File(getExternalFilesDir(null), "counters.txt");
-            if (!f.exists()) { counterOverlay.setText(""); return; }
+            if (!f.exists()) {
+                counterOverlay.setText("");
+                return;
+            }
             BufferedReader br = new BufferedReader(new FileReader(f));
             String line = br.readLine();
             br.close();
@@ -353,7 +403,10 @@ snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
     protected void onDestroy() {
         super.onDestroy();
         stopDetection();
-        if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.release(); }
+        if (mediaPlayer != null) {
+            mediaPlayer.stop();
+            mediaPlayer.release();
+        }
         if (libVLC != null) libVLC.release();
         if (faceDetector != null) faceDetector.close();
     }
