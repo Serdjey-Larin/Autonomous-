@@ -146,3 +146,18 @@
             android:layout_height="48dp"/>
     </LinearLayout>
 </LinearLayout>
+<Button
+    android:id="@+id/stats_btn"
+    android:text="СТАТИСТИКА"
+    android:textSize="13sp"
+    android:layout_marginTop="8dp"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"/>
+
+<Button
+    android:id="@+id/snapshot_btn"
+    android:text="📷 СНИМОК (улучшить)"
+    android:textSize="13sp"
+    android:layout_marginTop="8dp"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"/>
