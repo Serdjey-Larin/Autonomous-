@@ -16,12 +16,14 @@ import java.util.UUID;
 public class MqttManager {
 
     private static final String TAG = "MqttManager";
+    private static MqttManager instance;
 
     private final Context context;
     private final String brokerUrl;
     private final String clientId;
     private MqttAndroidClient client;
     private MqttListener listener;
+    private boolean connecting = false;
 
     public interface MqttListener {
         void onConnected();
@@ -30,20 +32,38 @@ public class MqttManager {
         void onError(String error);
     }
 
-    public MqttManager(Context context, String brokerUrl) {
-        this.context = context;
+    private MqttManager(Context context, String brokerUrl) {
+        this.context = context.getApplicationContext();
         this.brokerUrl = brokerUrl;
+        // clientId создаётся один раз и хранится всё время жизни приложения
         this.clientId = "Eye_" + UUID.randomUUID().toString().substring(0, 8);
-        this.client = new MqttAndroidClient(context, brokerUrl, clientId);
+        this.client = new MqttAndroidClient(this.context, brokerUrl, clientId);
+    }
+
+    public static synchronized MqttManager getInstance(Context context, String brokerUrl) {
+        if (instance == null) {
+            instance = new MqttManager(context, brokerUrl);
+        }
+        return instance;
     }
 
     public void setListener(MqttListener listener) {
         this.listener = listener;
+        // Если уже подключены — сразу сообщаем
+        if (isConnected() && listener != null) {
+            listener.onConnected();
+        }
     }
 
     public void connect(String username, String password) {
+        if (isConnected() || connecting) {
+            Log.d(TAG, "Already connected or connecting");
+            return;
+        }
+        connecting = true;
+
         MqttConnectOptions options = new MqttConnectOptions();
-        options.setAutomaticReconnect(true);
+        options.setAutomaticReconnect(false);   // отключаем встроенный reconnect
         options.setCleanSession(true);
         options.setConnectionTimeout(30);
         options.setKeepAliveInterval(60);
@@ -56,13 +76,19 @@ public class MqttManager {
             @Override
             public void connectComplete(boolean reconnect, String serverURI) {
                 Log.d(TAG, "Connected to " + serverURI);
+                connecting = false;
                 if (listener != null) listener.onConnected();
             }
 
             @Override
             public void connectionLost(Throwable cause) {
                 Log.e(TAG, "Connection lost", cause);
+                connecting = false;
                 if (listener != null) listener.onDisconnected();
+
+                // Пробуем переподключиться через 5 секунд
+                new android.os.Handler(android.os.Looper.getMainLooper())
+                        .postDelayed(() -> connect(username, password), 5000);
             }
 
             @Override
@@ -82,15 +108,19 @@ public class MqttManager {
                 @Override
                 public void onSuccess(IMqttToken asyncActionToken) {
                     Log.d(TAG, "Connect success");
+                    connecting = false;
                 }
 
                 @Override
                 public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
                     Log.e(TAG, "Connect failed", exception);
-                    if (listener != null) listener.onError("Connect failed: " + exception.getMessage());
+                    connecting = false;
+                    if (listener != null)
+                        listener.onError("Connect failed: " + exception.getMessage());
                 }
             });
         } catch (Exception e) {
+            connecting = false;
             Log.e(TAG, "Connect error", e);
             if (listener != null) listener.onError(e.getMessage());
         }
@@ -98,6 +128,7 @@ public class MqttManager {
 
     public void subscribe(String topic, int qos) {
         try {
+            if (!isConnected()) return;
             client.subscribe(topic, qos, null, new IMqttActionListener() {
                 @Override
                 public void onSuccess(IMqttToken asyncActionToken) {
@@ -116,6 +147,7 @@ public class MqttManager {
 
     public void publish(String topic, String payload, int qos, boolean retained) {
         try {
+            if (!isConnected()) return;
             MqttMessage message = new MqttMessage(payload.getBytes());
             message.setQos(qos);
             message.setRetained(retained);
@@ -125,14 +157,9 @@ public class MqttManager {
         }
     }
 
+    /** НЕ отключаем — иначе при перезапуске Activity будет новый клиент. */
     public void disconnect() {
-        try {
-            if (client != null && client.isConnected()) {
-                client.disconnect();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Disconnect error", e);
-        }
+        // оставляем намеренно пустым: пусть клиент живёт, пока приложение в памяти
     }
 
     public boolean isConnected() {
