@@ -14,7 +14,7 @@ import java.util.List;
 public class OverlayView extends View {
 
     private final List<RectF> boxes = new ArrayList<>();
-    private final Paint paint;
+    private Paint paint;
 
     public OverlayView(Context context) {
         super(context);
