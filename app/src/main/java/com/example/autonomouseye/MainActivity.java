@@ -111,18 +111,15 @@ public class MainActivity extends AppCompatActivity {
                 .build();
         faceDetector = FaceDetection.getClient(faceOpts);
 
+        // Только безопасные опции, не ломающие инициализацию libVLC
         ArrayList<String> options = new ArrayList<>();
-options.add("--rtsp-tcp");
-options.add("--network-caching=1500");
-options.add("--no-hw-dec");                        // отключаем hw-decoder
-options.add("--vout=android_display");             // software-рендер в Surface
-options.add("--no-drop-late-frames");
-options.add("--no-skip-frames");
+        options.add("--rtsp-tcp");
+        options.add("--network-caching=1500");
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        // SurfaceView — PixelCopy работает с ним надёжно
+        // SurfaceView — для PixelCopy
         videoLayout.post(() -> {
             try {
                 mediaPlayer.attachViews(videoLayout, null, false, false);
@@ -232,6 +229,7 @@ options.add("--no-skip-frames");
         try {
             lastUrl = url;
             Media media = new Media(libVLC, Uri.parse(url));
+            // Безопасное отключение HW-декодера → работает PixelCopy
             media.setHWDecoderEnabled(false, false);
             mediaPlayer.setMedia(media);
             media.release();
@@ -263,10 +261,10 @@ options.add("--no-skip-frames");
         }
     };
 
-    // ================= ЗАХВАТ КАДРА ЧЕРЕЗ PIXELCOPY =================
+    // ============ ЗАХВАТ КАДРА ============
 
     private void captureFrame(Consumer<Bitmap> callback) {
-        // Пробуем PixelCopy через SurfaceView — самый надёжный способ
+        // 1. PixelCopy через SurfaceView — самый надёжный
         SurfaceView surfaceView = findSurfaceView(videoLayout);
         if (surfaceView != null
                 && surfaceView.getWidth() > 0
@@ -291,7 +289,7 @@ options.add("--no-skip-frames");
             }
         }
 
-        // Фолбэк: TextureView.getBitmap()
+        // 2. Фолбэк: TextureView.getBitmap()
         TextureView textureView = findTextureView(videoLayout);
         if (textureView != null && textureView.isAvailable()) {
             Bitmap bmp = textureView.getBitmap();
