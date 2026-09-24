@@ -96,7 +96,16 @@ public class MainActivity extends AppCompatActivity {
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
-        mediaPlayer.attachViews(videoLayout, null, false, true);
+
+        // ВАЖНО: подключаем view ПОСЛЕ того, как он будет размечен
+        videoLayout.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    mediaPlayer.attachViews(videoLayout, null, false, true);
+                } catch (Exception ignored) {}
+            }
+        });
 
         mediaPlayer.setEventListener(new MediaPlayer.EventListener() {
             @Override
@@ -150,9 +159,11 @@ public class MainActivity extends AppCompatActivity {
 
         statsBtn.setOnClickListener(v -> showStats());
 
-        // АВТОЗАПУСК
+        // АВТОЗАПУСК: сервис в фоне
         startDetectorService(savedUrl);
-        handler.postDelayed(() -> playStream(savedUrl), 800);
+
+        // АВТОЗАПУСК: поток + детекция через 1.5 сек, чтобы view успел разметаться
+        handler.postDelayed(() -> playStream(savedUrl), 1500);
     }
 
     private void setStatus(boolean online, String text) {
@@ -297,14 +308,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ===== LIFECYCLE =====
+
     @Override
     protected void onStart() {
         super.onStart();
         if (mediaPlayer != null && videoLayout != null) {
-            try {
-                mediaPlayer.detachViews();
-                mediaPlayer.attachViews(videoLayout, null, false, true);
-            } catch (Exception ignored) {}
+            videoLayout.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        mediaPlayer.detachViews();
+                        mediaPlayer.attachViews(videoLayout, null, false, true);
+                    } catch (Exception ignored) {}
+                }
+            });
         }
     }
 
@@ -312,11 +330,13 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         if (mediaPlayer != null && mediaPlayer.getMedia() != null && !lastUrl.isEmpty()) {
-            try {
-                mediaPlayer.play();
-                setStatus(true, "Поток идёт");
-                if (!detectionRunning) startDetection();
-            } catch (Exception ignored) {}
+            handler.postDelayed(() -> {
+                try {
+                    mediaPlayer.play();
+                    setStatus(true, "Поток идёт");
+                    if (!detectionRunning) startDetection();
+                } catch (Exception ignored) {}
+            }, 500);
         }
     }
 
