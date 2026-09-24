@@ -1,7 +1,9 @@
+
 package com.example.autonomouseye;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -41,6 +43,11 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String PREFS = "eye";
+    private static final String PREF_URL = "rtsp_url";
+    private static final String DEFAULT_URL =
+            "rtsp://admin:123456@192.168.0.112:554/0/av1";
+
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
@@ -50,11 +57,11 @@ public class MainActivity extends AppCompatActivity {
     private View statusDot;
     private TextView counterOverlay;
     private FaceDetector faceDetector;
+    private SharedPreferences prefs;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean detectionRunning = false;
     private static final int DETECT_INTERVAL_MS = 1500;
-
     private String lastUrl = "";
 
     @Override
@@ -64,6 +71,8 @@ public class MainActivity extends AppCompatActivity {
 
         requestNotificationPermission();
 
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+
         videoLayout = findViewById(R.id.video_layout);
         overlay = findViewById(R.id.overlay);
         urlInput = findViewById(R.id.url_input);
@@ -71,7 +80,9 @@ public class MainActivity extends AppCompatActivity {
         statusDot = findViewById(R.id.status_dot);
         counterOverlay = findViewById(R.id.counter_overlay);
 
-        urlInput.setText("rtsp://admin:123456@192.168.0.112:554/0/av1");
+        // Загружаем сохранённый URL
+        String savedUrl = prefs.getString(PREF_URL, DEFAULT_URL);
+        urlInput.setText(savedUrl);
 
         FaceDetectorOptions faceOpts = new FaceDetectorOptions.Builder()
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -87,8 +98,16 @@ public class MainActivity extends AppCompatActivity {
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
-        // TRUE = использовать TextureView (нужно для захвата кадра)
         mediaPlayer.attachViews(videoLayout, null, false, true);
+
+        // Автозапуск детекции при старте потока
+        mediaPlayer.addListener(event -> {
+            if (event.type == MediaPlayer.Event.Playing) {
+                if (!detectionRunning) {
+                    startDetection();
+                }
+            }
+        });
 
         setStatus(false, "Отключено");
         updateCounterOverlay();
@@ -99,7 +118,11 @@ public class MainActivity extends AppCompatActivity {
         Button serviceBtn = findViewById(R.id.service_btn);
         Button statsBtn = findViewById(R.id.stats_btn);
 
-        playBtn.setOnClickListener(v -> playStream(urlInput.getText().toString()));
+        playBtn.setOnClickListener(v -> {
+            String url = urlInput.getText().toString();
+            prefs.edit().putString(PREF_URL, url).apply();
+            playStream(url);
+        });
 
         stopBtn.setOnClickListener(v -> {
             stopDetection();
@@ -119,8 +142,19 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        serviceBtn.setOnClickListener(v -> startDetectorService());
+        serviceBtn.setOnClickListener(v -> {
+            String url = urlInput.getText().toString();
+            prefs.edit().putString(PREF_URL, url).apply();
+            startDetectorService(url);
+        });
+
         statsBtn.setOnClickListener(v -> showStats());
+
+        // АВТОЗАПУСК СЕРВИСА при открытии приложения
+        startDetectorService(savedUrl);
+
+        // АВТОЗАПУСК ПОТОКА И ДЕТЕКЦИИ
+        handler.postDelayed(() -> playStream(savedUrl), 800);
     }
 
     private void setStatus(boolean online, String text) {
@@ -147,7 +181,6 @@ public class MainActivity extends AppCompatActivity {
     private void startDetection() {
         if (detectionRunning) return;
         detectionRunning = true;
-        Toast.makeText(this, "Детектор лиц включён", Toast.LENGTH_SHORT).show();
         handler.post(detectionLoop);
     }
 
@@ -189,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
                         statusText.setText("Лиц в кадре: " + boxes.size());
                     }
                 })
-                .addOnFailureListener(e -> { /* пропускаем кадр */ });
+                .addOnFailureListener(e -> { });
     }
 
     private Bitmap captureFrame() {
@@ -206,26 +239,26 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void startDetectorService() {
-        Intent intent = new Intent(this, DetectorService.class);
-        intent.putExtra("rtsp_url", urlInput.getText().toString());
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent);
-        } else {
-            startService(intent);
+    private void startDetectorService(String url) {
+        try {
+            Intent intent = new Intent(this, DetectorService.class);
+            intent.putExtra("rtsp_url", url);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            setStatus(true, "Сервис работает в фоне");
+        } catch (Exception e) {
+            Toast.makeText(this, "Ошибка сервиса: " + e.getMessage(),
+                    Toast.LENGTH_LONG).show();
         }
-        Toast.makeText(this, "Сервис запущен. Приложение можно закрыть.",
-                Toast.LENGTH_LONG).show();
-        setStatus(true, "Сервис работает в фоне");
     }
 
     private void updateCounterOverlay() {
         try {
             File f = new File(getExternalFilesDir(null), "counters.txt");
-            if (!f.exists()) {
-                counterOverlay.setText("");
-                return;
-            }
+            if (!f.exists()) { counterOverlay.setText(""); return; }
             BufferedReader br = new BufferedReader(new FileReader(f));
             String line = br.readLine();
             br.close();
@@ -266,15 +299,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ===== LIFECYCLE =====
-
     @Override
     protected void onStart() {
         super.onStart();
         if (mediaPlayer != null && videoLayout != null) {
             try {
                 mediaPlayer.detachViews();
-                // TRUE = TextureView
                 mediaPlayer.attachViews(videoLayout, null, false, true);
             } catch (Exception ignored) {}
         }
@@ -287,6 +317,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 mediaPlayer.play();
                 setStatus(true, "Поток идёт");
+                if (!detectionRunning) startDetection();
             } catch (Exception ignored) {}
         }
     }
@@ -295,9 +326,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         if (mediaPlayer != null) {
-            try {
-                mediaPlayer.detachViews();
-            } catch (Exception ignored) {}
+            try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
         }
     }
 
@@ -305,10 +334,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         stopDetection();
-        if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            mediaPlayer.release();
-        }
+        if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.release(); }
         if (libVLC != null) libVLC.release();
         if (faceDetector != null) faceDetector.close();
     }
