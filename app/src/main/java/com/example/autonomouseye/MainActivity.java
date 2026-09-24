@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -51,6 +52,15 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_URL =
             "rtsp://admin:123456@192.168.0.112:554/0/av1";
 
+    // ====== НАСТРОЙКИ MQTT ======
+    private static final String MQTT_BROKER =
+            "ssl://o66f8ec6.ala.eu-central-1.emqxsl.com:8883";
+    private static final String MQTT_USER = "Eye";
+    private static final String MQTT_PASS = "Eye12345!";
+    private static final String TOPIC_EVENT = "home/gate/event/face";
+    private static final String TOPIC_STATUS = "home/gate/status";
+    private static final String TOPIC_BATTERY = "home/gate/battery";
+
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
@@ -61,11 +71,14 @@ public class MainActivity extends AppCompatActivity {
     private TextView counterOverlay;
     private FaceDetector faceDetector;
     private SharedPreferences prefs;
+    private MqttManager mqttManager;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean detectionRunning = false;
     private static final int DETECT_INTERVAL_MS = 1500;
     private String lastUrl = "";
+    private long lastMqttPublish = 0;
+    private static final long MQTT_COOLDOWN_MS = 10000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,24 +114,15 @@ public class MainActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        // Подключаем TextureView после того, как он разметится
-        videoLayout.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    mediaPlayer.attachViews(videoLayout, null, false, true);
-                } catch (Exception ignored) {}
-            }
+        videoLayout.post(() -> {
+            try {
+                mediaPlayer.attachViews(videoLayout, null, false, true);
+            } catch (Exception ignored) {}
         });
 
-        mediaPlayer.setEventListener(new MediaPlayer.EventListener() {
-            @Override
-            public void onEvent(MediaPlayer.Event event) {
-                if (event.type == MediaPlayer.Event.Playing) {
-                    if (!detectionRunning) {
-                        startDetection();
-                    }
-                }
+        mediaPlayer.setEventListener(event -> {
+            if (event.type == MediaPlayer.Event.Playing) {
+                if (!detectionRunning) startDetection();
             }
         });
 
@@ -163,17 +167,57 @@ public class MainActivity extends AppCompatActivity {
 
         statsBtn.setOnClickListener(v -> showStats());
 
-        // Кнопка "СНИМОК" — с улучшением (denoise + sharpen)
         Button snapshotBtn = findViewById(R.id.snapshot_btn);
         if (snapshotBtn != null) {
             snapshotBtn.setOnClickListener(v -> takeEnhancedSnapshot());
         }
 
-        // АВТОЗАПУСК: сервис в фоне
-        startDetectorService(savedUrl);
+        // Инициализация MQTT
+        initMqtt();
 
-        // АВТОЗАПУСК: поток + детекция через 1.5 сек
+        // Автозапуск
+        startDetectorService(savedUrl);
         handler.postDelayed(() -> playStream(savedUrl), 1500);
+    }
+
+    private void initMqtt() {
+        try {
+            mqttManager = new MqttManager(this, MQTT_BROKER);
+            mqttManager.setListener(new MqttManager.MqttListener() {
+                @Override
+                public void onConnected() {
+                    Log.d("MQTT", "Connected");
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "MQTT подключён", Toast.LENGTH_SHORT).show());
+                    mqttManager.subscribe(TOPIC_BATTERY, 1);
+                    mqttManager.publish(TOPIC_STATUS, "online", 1, true);
+                }
+
+                @Override
+                public void onDisconnected() {
+                    Log.d("MQTT", "Disconnected");
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "MQTT отключён", Toast.LENGTH_SHORT).show());
+                }
+
+                @Override
+                public void onMessageReceived(String topic, String payload) {
+                    Log.d("MQTT", topic + ": " + payload);
+                    if (TOPIC_BATTERY.equals(topic)) {
+                        runOnUiThread(() -> statusText.setText("АКБ: " + payload + " В"));
+                    }
+                }
+
+                @Override
+                public void onError(String error) {
+                    Log.e("MQTT", error);
+                }
+            });
+            mqttManager.connect(MQTT_USER, MQTT_PASS);
+        } catch (Exception e) {
+            Toast.makeText(this, "MQTT ошибка: " + e.getMessage(),
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private void setStatus(boolean online, String text) {
@@ -239,9 +283,24 @@ public class MainActivity extends AppCompatActivity {
                     overlay.setBoxes(boxes);
                     if (!boxes.isEmpty()) {
                         statusText.setText("Лиц в кадре: " + boxes.size());
+
+                        // Публикуем событие в MQTT (не чаще 1 раза в 10 сек)
+                        long now = System.currentTimeMillis();
+                        if (now - lastMqttPublish > MQTT_COOLDOWN_MS) {
+                            lastMqttPublish = now;
+                            publishFaceEvent(boxes.size());
+                        }
                     }
                 })
                 .addOnFailureListener(e -> { });
+    }
+
+    private void publishFaceEvent(int count) {
+        if (mqttManager == null || !mqttManager.isConnected()) return;
+        String payload = "{\"count\":" + count
+                + ",\"time\":\"" + new Date().toString() + "\"}";
+        mqttManager.publish(TOPIC_EVENT, payload, 1, false);
+        Log.d("MQTT", "Published: " + payload);
     }
 
     private Bitmap captureFrame() {
@@ -258,10 +317,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * Снимок с улучшением: median-фильтр + unsharp mask.
-     * Работает в фоновом потоке, результат сохраняется в /events/.
-     */
     private void takeEnhancedSnapshot() {
         Bitmap raw = captureFrame();
         if (raw == null) {
@@ -359,20 +414,15 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ===== LIFECYCLE =====
-
     @Override
     protected void onStart() {
         super.onStart();
         if (mediaPlayer != null && videoLayout != null) {
-            videoLayout.post(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        mediaPlayer.detachViews();
-                        mediaPlayer.attachViews(videoLayout, null, false, true);
-                    } catch (Exception ignored) {}
-                }
+            videoLayout.post(() -> {
+                try {
+                    mediaPlayer.detachViews();
+                    mediaPlayer.attachViews(videoLayout, null, false, true);
+                } catch (Exception ignored) {}
             });
         }
     }
@@ -403,10 +453,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         stopDetection();
-        if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            mediaPlayer.release();
-        }
+        if (mqttManager != null) mqttManager.disconnect();
+        if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.release(); }
         if (libVLC != null) libVLC.release();
         if (faceDetector != null) faceDetector.close();
     }
