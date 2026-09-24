@@ -1,4 +1,3 @@
-
 package com.example.autonomouseye;
 
 import android.Manifest;
@@ -80,7 +79,6 @@ public class MainActivity extends AppCompatActivity {
         statusDot = findViewById(R.id.status_dot);
         counterOverlay = findViewById(R.id.counter_overlay);
 
-        // Загружаем сохранённый URL
         String savedUrl = prefs.getString(PREF_URL, DEFAULT_URL);
         urlInput.setText(savedUrl);
 
@@ -100,11 +98,13 @@ public class MainActivity extends AppCompatActivity {
         mediaPlayer = new MediaPlayer(libVLC);
         mediaPlayer.attachViews(videoLayout, null, false, true);
 
-        // Автозапуск детекции при старте потока
-        mediaPlayer.addListener(event -> {
-            if (event.type == MediaPlayer.Event.Playing) {
-                if (!detectionRunning) {
-                    startDetection();
+        mediaPlayer.setEventListener(new MediaPlayer.EventListener() {
+            @Override
+            public void onEvent(MediaPlayer.Event event) {
+                if (event.type == MediaPlayer.Event.Playing) {
+                    if (!detectionRunning) {
+                        startDetection();
+                    }
                 }
             }
         });
@@ -150,10 +150,8 @@ public class MainActivity extends AppCompatActivity {
 
         statsBtn.setOnClickListener(v -> showStats());
 
-        // АВТОЗАПУСК СЕРВИСА при открытии приложения
+        // АВТОЗАПУСК
         startDetectorService(savedUrl);
-
-        // АВТОЗАПУСК ПОТОКА И ДЕТЕКЦИИ
         handler.postDelayed(() -> playStream(savedUrl), 800);
     }
 
@@ -281,7 +279,7 @@ public class MainActivity extends AppCompatActivity {
             br.close();
             String[] p = line.split("\\|");
             Toast.makeText(this,
-                    "📅 " + p[0] + "\nСегодня: " + p[1] + "\nВсего: " + p[2],
+                    p[0] + "\nСегодня: " + p[1] + "\nВсего: " + p[2],
                     Toast.LENGTH_LONG).show();
             updateCounterOverlay();
         } catch (Exception e) {
