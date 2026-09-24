@@ -29,4 +29,5 @@ dependencies {
     implementation("com.google.mlkit:image-labeling:17.0.8")
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("com.github.hannesa2:paho.mqtt.android:4.3.beta2")
+implementation("com.arthenica:ffmpeg-kit-min:6.0-2")
 }
