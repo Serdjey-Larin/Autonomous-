@@ -3,9 +3,15 @@ package com.example.autonomouseye;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -16,6 +22,12 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.face.Face;
+import com.google.mlkit.vision.face.FaceDetection;
+import com.google.mlkit.vision.face.FaceDetector;
+import com.google.mlkit.vision.face.FaceDetectorOptions;
+
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
@@ -25,6 +37,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -36,6 +49,11 @@ public class MainActivity extends AppCompatActivity {
     private TextView statusText;
     private View statusDot;
     private TextView counterOverlay;
+    private FaceDetector faceDetector;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private boolean detectionRunning = false;
+    private static final int DETECT_INTERVAL_MS = 1500;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,6 +70,14 @@ public class MainActivity extends AppCompatActivity {
         counterOverlay = findViewById(R.id.counter_overlay);
 
         urlInput.setText("rtsp://admin:123456@192.168.0.112:554/0/av1");
+
+        FaceDetectorOptions faceOpts = new FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setMinFaceSize(0.1f)
+                .build();
+        faceDetector = FaceDetection.getClient(faceOpts);
 
         ArrayList<String> options = new ArrayList<>();
         options.add("--rtsp-tcp");
@@ -73,14 +99,21 @@ public class MainActivity extends AppCompatActivity {
         playBtn.setOnClickListener(v -> playStream(urlInput.getText().toString()));
 
         stopBtn.setOnClickListener(v -> {
+            stopDetection();
             mediaPlayer.stop();
             overlay.clear();
             setStatus(false, "Остановлено");
         });
 
-        detectBtn.setOnClickListener(v -> Toast.makeText(this,
-                "Для фоновой детекции нажмите «Сервис»",
-                Toast.LENGTH_LONG).show());
+        detectBtn.setOnClickListener(v -> {
+            if (detectionRunning) {
+                stopDetection();
+                overlay.clear();
+                Toast.makeText(this, "Детектор выключен", Toast.LENGTH_SHORT).show();
+            } else {
+                startDetection();
+            }
+        });
 
         serviceBtn.setOnClickListener(v -> startDetectorService());
         statsBtn.setOnClickListener(v -> showStats());
@@ -103,6 +136,68 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             urlInput.setError(e.getMessage());
             setStatus(false, "Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void startDetection() {
+        if (detectionRunning) return;
+        detectionRunning = true;
+        Toast.makeText(this, "Детектор лиц включён", Toast.LENGTH_SHORT).show();
+        handler.post(detectionLoop);
+    }
+
+    private void stopDetection() {
+        detectionRunning = false;
+        handler.removeCallbacks(detectionLoop);
+    }
+
+    private final Runnable detectionLoop = new Runnable() {
+        @Override
+        public void run() {
+            if (!detectionRunning) return;
+            processFrame();
+            handler.postDelayed(this, DETECT_INTERVAL_MS);
+        }
+    };
+
+    private void processFrame() {
+        Bitmap bitmap = captureFrame();
+        if (bitmap == null) return;
+
+        InputImage image = InputImage.fromBitmap(bitmap, 0);
+        faceDetector.process(image)
+                .addOnSuccessListener(faces -> {
+                    List<RectF> boxes = new ArrayList<>();
+                    float scaleX = (float) overlay.getWidth() / bitmap.getWidth();
+                    float scaleY = (float) overlay.getHeight() / bitmap.getHeight();
+                    for (Face face : faces) {
+                        Rect b = face.getBoundingBox();
+                        boxes.add(new RectF(
+                                b.left * scaleX,
+                                b.top * scaleY,
+                                b.right * scaleX,
+                                b.bottom * scaleY
+                        ));
+                    }
+                    overlay.setBoxes(boxes);
+                    if (!boxes.isEmpty()) {
+                        statusText.setText("Лиц в кадре: " + boxes.size());
+                    }
+                })
+                .addOnFailureListener(e -> { /* пропускаем кадр */ });
+    }
+
+    private Bitmap captureFrame() {
+        try {
+            int w = videoLayout.getWidth();
+            int h = videoLayout.getHeight();
+            if (w <= 0 || h <= 0) return null;
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bmp);
+            videoLayout.draw(canvas);
+            return bmp;
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -169,10 +264,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        stopDetection();
         if (mediaPlayer != null) {
             mediaPlayer.stop();
             mediaPlayer.release();
         }
         if (libVLC != null) libVLC.release();
+        if (faceDetector != null) faceDetector.close();
     }
 }
