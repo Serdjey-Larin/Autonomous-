@@ -55,6 +55,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean detectionRunning = false;
     private static final int DETECT_INTERVAL_MS = 1500;
 
+    private String lastUrl = "";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -103,6 +105,7 @@ public class MainActivity extends AppCompatActivity {
             mediaPlayer.stop();
             overlay.clear();
             setStatus(false, "Остановлено");
+            lastUrl = "";
         });
 
         detectBtn.setOnClickListener(v -> {
@@ -127,6 +130,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void playStream(String url) {
         try {
+            lastUrl = url;
             Media media = new Media(libVLC, Uri.parse(url));
             media.setHWDecoderEnabled(true, false);
             mediaPlayer.setMedia(media);
@@ -258,6 +262,43 @@ public class MainActivity extends AppCompatActivity {
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
             }
+        }
+    }
+
+    // ===== LIFECYCLE =====
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // Перепривязываем видео к новому Surface после возврата
+        if (mediaPlayer != null && videoLayout != null) {
+            try {
+                mediaPlayer.detachViews();
+                mediaPlayer.attachViews(videoLayout, null, false, false);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Если поток был запущен — возобновляем воспроизведение
+        if (mediaPlayer != null && mediaPlayer.getMedia() != null && !lastUrl.isEmpty()) {
+            try {
+                mediaPlayer.play();
+                setStatus(true, "Поток идёт");
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Отсоединяем Surface, но не останавливаем поток
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.detachViews();
+            } catch (Exception ignored) {}
         }
     }
 
