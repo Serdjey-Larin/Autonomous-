@@ -182,7 +182,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void initMqtt() {
         try {
-            mqttManager = new MqttManager(this, MQTT_BROKER);
+            mqttManager = MqttManager.getInstance(this, MQTT_BROKER);
             mqttManager.setListener(new MqttManager.MqttListener() {
                 @Override
                 public void onConnected() {
