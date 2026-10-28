@@ -1,0 +1,67 @@
+name: LARIN COLD GSM Control — APK из ZIP
+
+on:
+  push:
+    branches: [larin-gsm-control-build]
+    paths: [LARIN_COLD_GITHUB_ACTIONS_APK_v0.1.1.zip]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Unpack original LARIN COLD source
+        shell: bash
+        run: |
+          mkdir -p larin_gsm_control
+          unzip -q LARIN_COLD_GITHUB_ACTIONS_APK_v0.1.1.zip -d larin_gsm_control
+          test -f larin_gsm_control/pubspec.yaml
+          test -f larin_gsm_control/lib/main.dart
+          test -s larin_gsm_control/assets/larin_cold_logo.png
+
+      - name: Generate Android project
+        working-directory: larin_gsm_control
+        run: flutter create --platforms=android --project-name=larin_cold_gsm_control --org=ru.larincold .
+
+      - name: Install dependencies
+        working-directory: larin_gsm_control
+        run: flutter pub get
+
+      - name: Run Dart tests
+        working-directory: larin_gsm_control
+        run: flutter test
+
+      - name: Install branded icons
+        working-directory: larin_gsm_control
+        run: bash tool/install_android_icons.sh
+
+      - name: Build release APK
+        working-directory: larin_gsm_control
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LARIN-COLD-GSM-Control-v0.1.1-APK
+          path: larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
