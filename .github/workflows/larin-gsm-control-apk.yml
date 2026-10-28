@@ -44,6 +44,41 @@ jobs:
         working-directory: larin_gsm_control
         run: flutter create --platforms=android --project-name=larin_cold_gsm_control --org=ru.larincold .
 
+      - name: Configure SMS app visibility
+        working-directory: larin_gsm_control
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          query = '''
+                  <intent>
+                      <action android:name="android.intent.action.SENDTO" />
+                      <data android:scheme="smsto" />
+                  </intent>
+          '''
+          if '</queries>' in text:
+              text = text.replace('</queries>', query + '</queries>', 1)
+          else:
+              text = text.replace('</manifest>', '<queries>' + query + '</queries>\n</manifest>', 1)
+          manifest.write_text(text)
+          root = ET.fromstring(text)
+          ns = '{http://schemas.android.com/apk/res/android}'
+          assert any(
+              i.find('action') is not None and
+              i.find('action').get(ns + 'name') == 'android.intent.action.SENDTO' and
+              i.find('data') is not None and
+              i.find('data').get(ns + 'scheme') == 'smsto'
+              for i in root.findall('./queries/intent')
+          ), 'Missing SMS package visibility query'
+          pubspec = Path('pubspec.yaml')
+          source = pubspec.read_text()
+          assert 'version: 0.1.1+2' in source
+          pubspec.write_text(source.replace('version: 0.1.1+2', 'version: 0.1.2+3', 1))
+          PY
+
       - name: Install dependencies
         working-directory: larin_gsm_control
         run: flutter pub get
@@ -65,7 +100,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LARIN-COLD-GSM-Control-v0.1.1-APK
+          name: LARIN-COLD-GSM-Control-v0.1.2-APK
           path: larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 30
