@@ -3,7 +3,7 @@ name: LARIN COLD GSM Control — APK из ZIP
 on:
   push:
     branches: [larin-gsm-control-build]
-    paths: [LARIN_COLD_GITHUB_ACTIONS_APK_v0.1.1.zip]
+    paths: [LARIN_COLD_GSM_Control_GitHub_Mini_0.1.1.zip]
   workflow_dispatch:
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p larin_gsm_control
-          unzip -q LARIN_COLD_GITHUB_ACTIONS_APK_v0.1.1.zip -d larin_gsm_control
+          unzip -q LARIN_COLD_GSM_Control_GitHub_Mini_0.1.1.zip -d larin_gsm_control
           test -f larin_gsm_control/pubspec.yaml
           test -f larin_gsm_control/lib/main.dart
           test -s larin_gsm_control/assets/larin_cold_logo.png
