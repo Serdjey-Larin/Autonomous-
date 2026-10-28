@@ -3,7 +3,9 @@ name: LARIN COLD GSM Control — APK из ZIP
 on:
   push:
     branches: [larin-gsm-control-build]
-    paths: [LARIN_COLD_GSM_Control_GitHub_Mini_0.1.1.zip]
+    paths:
+      - 'LARIN_COLD_GSM_Control_GitHub_Mini_0.1.1.zip'
+      - '.github/workflows/larin-gsm-control-apk.yml'
   workflow_dispatch:
 
 permissions:
@@ -48,7 +50,9 @@ jobs:
 
       - name: Run Dart tests
         working-directory: larin_gsm_control
-        run: flutter test
+        run: |
+          rm -f test/widget_test.dart # template references MyApp, not our real app
+          flutter test
 
       - name: Install branded icons
         working-directory: larin_gsm_control
