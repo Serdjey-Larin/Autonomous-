@@ -64,7 +64,7 @@ jobs:
           log = open("probe-build.log", encoding="utf-8", errors="replace").read()
           parts = re.findall(r"\* What went wrong:\n(.*?)(?:\n\* Try:|\Z)", log, re.S)
           errs = [l for l in log.splitlines() if l.startswith(("e: ", "ERROR", "FAILURE"))]
-          text = "\n".join(parts)[:3500] or "\n".join(errs[-40:])[:3500] or log[-3500:]
+          text = ("\n".join(errs[-30:]) + "\n" + "\n".join(parts)).strip()[:3800] or log[-3500:]
           print("::error title=Gradle::" + text.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))
           PY
             exit "$rc"
