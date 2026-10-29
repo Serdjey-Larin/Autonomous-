@@ -899,14 +899,14 @@ class _ActionRow extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => ListTile(
+  Widget build(BuildContext context) => Material(color: Colors.transparent, child: ListTile(
     contentPadding: EdgeInsets.zero,
     leading: Icon(icon, color: _blue),
     title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
     subtitle: Text(description, style: const TextStyle(fontSize: 11)),
     trailing: const Icon(Icons.chevron_right_rounded),
     onTap: onTap,
-  );
+  ));
 }
 
 class _CountdownDial extends StatelessWidget {
