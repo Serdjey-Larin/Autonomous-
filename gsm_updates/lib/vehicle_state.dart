@@ -87,6 +87,15 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
         car.startMs = null;
       }
       car.basis = 'status';
+      car.outAlready = s.already;
+      // STATUS в ответ на отправленную команду: её отправка и приём подтверждены.
+      final pend = car.pendingCommand, pendAt = car.pendingSince;
+      if (pend != null && pendAt != null && at >= pendAt - 60000 &&
+          at - pendAt <= replyTimeout.inMilliseconds &&
+          (pend == 'START' || pend == 'STOP' || pend.startsWith('TIME:') || pend == 'STATUS')) {
+        car.pendingCommand = null;
+        car.pendingSince = null;
+      }
       // Состояние известно — ожидание любой команды закрыто.
       car.awaitCmd = null;
       car.awaitSince = null;
@@ -274,9 +283,11 @@ String statusLine(VehicleConfig car, DateTime now) {
   }
   if (car.outState != null && car.outAt != null) {
     if (statusFresh(car, now)) {
-      if (_runningByStatus(car, now)) return 'Прогрев запущен · SMS в ${_clock(car.outAt!)}';
+      if (_runningByStatus(car, now)) {
+        return '${car.outAlready ? 'Прогрев уже идёт' : 'Прогрев запущен'} · SMS в ${_clock(car.outAt!)}';
+      }
       if (car.outState == 'on') return 'Прогрев завершён по таймеру';
-      return 'Прогрев выключен · SMS в ${_clock(car.outAt!)}';
+      return '${car.outAlready ? 'Прогрев уже выключен' : 'Прогрев выключен'} · SMS в ${_clock(car.outAt!)}';
     }
     return 'Данные от ${_dayClock(car.outAt!)} устарели · обновите состояние';
   }

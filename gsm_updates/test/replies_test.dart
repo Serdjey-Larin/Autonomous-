@@ -260,6 +260,19 @@ void main() {
       car.balanceRub = -3;
       expect(balanceLow(car), isTrue);
     });
+    test('START while running: «уже идёт» and the pending START is closed', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233',
+          pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
+      const already = 'LARIN COLD\nAlready running\nHeater: ON\nLeft: 20 min\nBattery: 14.6 V\nTime: 30 min';
+      expect(parseReply(already).status!.already, isTrue);
+      expect(parseReply(statusOn).status!.already, isFalse);
+      applyReply(car, sms(1, '+79281050233', already, t0.add(const Duration(seconds: 40))));
+      expect(car.pendingCommand, isNull);
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Прогрев уже идёт · SMS в 07:00');
+      expect(statusTone(car, t0.add(const Duration(minutes: 1))), StatusTone.on);
+      applyReply(car, sms(2, '+79281050233', statusOn, t0.add(const Duration(minutes: 2))));
+      expect(statusLine(car, t0.add(const Duration(minutes: 3))), 'Прогрев запущен · SMS в 07:02');
+    });
     test('winter snow season is 1 December – 30 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
       expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);

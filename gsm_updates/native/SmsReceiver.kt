@@ -137,6 +137,7 @@ class SmsReceiver : BroadcastReceiver() {
  */
 object ReplyNotifier {
     private const val CHANNEL = "larin_replies"
+    private val already = Regex("""\balready\b|уже""", RegexOption.IGNORE_CASE)
     private val heater = Regex("""heater\s*:\s*(on|off)""", RegexOption.IGNORE_CASE)
     private val left = Regex("""left\s*:\s*(\d{1,3})\s*min""", RegexOption.IGNORE_CASE)
     private val time = Regex("""time\s*:\s*(\d{1,3})\s*min""", RegexOption.IGNORE_CASE)
@@ -165,13 +166,13 @@ object ReplyNotifier {
             val cycle = time.find(text)?.groupValues?.get(1)?.toIntOrNull()
             val volts = if (v != null) "АКБ $v В" else ""
             if (on && l != null && l > 0 && (cycle == null || l <= cycle)) {
-                title = "$name · прогрев запущен"
+                title = if (already.containsMatchIn(text)) "$name · прогрев уже идёт" else "$name · прогрев запущен"
                 line = listOf("Осталось $l мин", volts).filter { it.isNotEmpty() }.joinToString(" · ")
                 if (id.isNotEmpty()) Alerts.schedule(c, JSONObject().put("key", "timer_$id").put("car", id)
                     .put("name", rawName).put("at", System.currentTimeMillis() + l * 60_000L)
                     .put("daily", false).put("minutes", 0))
             } else {
-                title = "$name · прогрев выключен"
+                title = if (already.containsMatchIn(text)) "$name · прогрев уже выключен" else "$name · прогрев выключен"
                 line = volts.ifEmpty { "Модуль ответил на запрос состояния." }
                 if (id.isNotEmpty() && !on) Alerts.cancel(c, "timer_$id")
             }

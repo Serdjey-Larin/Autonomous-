@@ -35,6 +35,7 @@ class VehicleConfig {
     this.balanceText,
     this.balanceAt,
     this.callAt,
+    this.outAlready = false,
   });
 
   String id;
@@ -77,6 +78,9 @@ class VehicleConfig {
   /// Звонок на модуль из приложения: выход переключён, состояние неизвестно
   /// до следующего STATUS.
   int? callAt;
+
+  /// Последний STATUS был ответом «уже запущен / уже выключен».
+  bool outAlready;
   int secondsLeft(DateTime now) => endMs == null ? 0 : ((endMs! - now.millisecondsSinceEpoch) / 1000).ceil().clamp(0, cycleMinutes * 60);
   Map<String, dynamic> toJson() => {'id': id, 'deviceNumber': deviceNumber, 'ownerNumber': ownerNumber,
     'vehicleName': vehicleName, 'durationMinutes': durationMinutes, 'ussdCode': ussdCode,
@@ -86,7 +90,8 @@ class VehicleConfig {
     'battery': battery, 'leftMin': leftMin, 'timeMin': timeMin,
     'lastReply': lastReply, 'lastReplyAt': lastReplyAt, 'awaitCmd': awaitCmd,
     'awaitSince': awaitSince, 'ackCmd': ackCmd, 'ackAt': ackAt,
-    'balanceRub': balanceRub, 'balanceText': balanceText, 'balanceAt': balanceAt, 'callAt': callAt};
+    'balanceRub': balanceRub, 'balanceText': balanceText, 'balanceAt': balanceAt, 'callAt': callAt,
+    'outAlready': outAlready};
   factory VehicleConfig.fromJson(Map<String, dynamic> j) => VehicleConfig(
     id: j['id'] as String, deviceNumber: j['deviceNumber'] as String? ?? '',
     ownerNumber: j['ownerNumber'] as String? ?? '', vehicleName: j['vehicleName'] as String? ?? 'Автомобиль',
@@ -101,7 +106,8 @@ class VehicleConfig {
     lastReplyAt: j['lastReplyAt'] as int?, awaitCmd: j['awaitCmd'] as String?,
     awaitSince: j['awaitSince'] as int?, ackCmd: j['ackCmd'] as String?,
     ackAt: j['ackAt'] as int?, balanceRub: (j['balanceRub'] as num?)?.toDouble(),
-    balanceText: j['balanceText'] as String?, balanceAt: j['balanceAt'] as int?, callAt: j['callAt'] as int?);
+    balanceText: j['balanceText'] as String?, balanceAt: j['balanceAt'] as int?, callAt: j['callAt'] as int?,
+    outAlready: j['outAlready'] == true);
   String deviceNumber;
   String ownerNumber;
   String vehicleName;
