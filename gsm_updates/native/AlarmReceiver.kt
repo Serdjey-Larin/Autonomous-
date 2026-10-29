@@ -46,7 +46,12 @@ object Alerts {
             if (row.optBoolean("daily") && (recalcDaily || row.getLong("at") <= System.currentTimeMillis()))
                 row.put("at", nextTime(row.getInt("minutes")))
             if (row.getLong("at") > System.currentTimeMillis()) schedule(c, row)
-            else cancel(c, row.getString("key"))
+            else {
+                val key = row.getString("key")
+                alarm(c).cancel(intent(c, key))
+                prefs(c).edit().remove(key).commit()
+                if (System.currentTimeMillis() - row.getLong("at") < 24 * 60 * 60 * 1000L) notify(c, row)
+            }
         }
     }
     fun notify(c: Context, row: JSONObject) {
