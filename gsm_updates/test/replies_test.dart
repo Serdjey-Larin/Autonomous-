@@ -273,6 +273,18 @@ void main() {
       applyReply(car, sms(2, '+79281050233', statusOn, t0.add(const Duration(minutes: 2))));
       expect(statusLine(car, t0.add(const Duration(minutes: 3))), 'Прогрев запущен · SMS в 07:02');
     });
+    test('module silent: hint about the SIM balance', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233',
+          pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
+      expect(replyOverdue(car, t0.add(const Duration(minutes: 2))), isFalse);
+      expect(replyOverdue(car, t0.add(const Duration(minutes: 6))), isTrue);
+      applyReply(car, sms(1, '+79281050233', statusOn, t0.add(const Duration(minutes: 7))));
+      expect(replyOverdue(car, t0.add(const Duration(minutes: 8))), isFalse);
+      applyCall(car, t0.add(const Duration(minutes: 10)));
+      expect(replyOverdue(car, t0.add(const Duration(minutes: 12))), isFalse);
+      expect(replyOverdue(car, t0.add(const Duration(minutes: 14))), isTrue);
+      expect(replyOverdue(car, t0.add(const Duration(hours: 3))), isFalse);
+    });
     test('winter snow season is 1 December – 30 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
       expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);

@@ -323,6 +323,19 @@ String balanceDate(VehicleConfig car) {
   return 'на ${two(t.day)}.${two(t.month)}, ${two(t.hour)}:${two(t.minute)}';
 }
 
+/// Модуль молчит дольше обычного: команда или звонок были, а ответа нет.
+/// Обычно ответ приходит за минуту; самая частая причина молчания — на SIM
+/// модуля кончились деньги (входящие команды и звонки работают, SMS не уходят).
+bool replyOverdue(VehicleConfig car, DateTime now) {
+  final nowMs = now.millisecondsSinceEpoch;
+  bool late(int? since, Duration after) =>
+      since != null && nowMs - since > after.inMilliseconds && nowMs - since <= const Duration(hours: 2).inMilliseconds;
+  if (car.pendingCommand != null && late(car.pendingSince, const Duration(minutes: 5))) return true;
+  if (car.awaitCmd != null && late(car.awaitSince, const Duration(minutes: 5))) return true;
+  if (afterCall(car) && late(car.callAt, const Duration(minutes: 3))) return true;
+  return false;
+}
+
 /// Зимний снег: с 1 декабря по 30 января включительно.
 bool isWinterSeason(DateTime d) => d.month == 12 || (d.month == 1 && d.day <= 30);
 

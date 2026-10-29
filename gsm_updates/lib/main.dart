@@ -743,6 +743,26 @@ class _HomeView extends StatelessWidget {
             action: TextButton(onPressed: configure, child: const Text('Настроить')),
           ),
         ],
+        if (configured && replyOverdue(config, now)) ...[
+          const SizedBox(height: 8),
+          _InfoStrip(
+            icon: Icons.sms_failed_outlined,
+            message: 'Модуль не отвечает. Чаще всего на SIM-карте модуля кончились деньги — '
+                'команды он принимает, а ответить не может. Пополните счёт ${config.deviceNumber}. '
+                'Проверка: позвоните на модуль — если после трёх сигналов прозвучат ещё шесть одинаковых, '
+                'модуль работает, но не может отправить SMS.',
+            action: TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: config.deviceNumber));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Номер модуля скопирован — вставьте его в приложении банка')));
+                }
+              },
+              child: const Text('Номер'),
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         _ControlCard(config: config, now: now, send: send, confirmPending: confirmPending),
         const SizedBox(height: 16),
