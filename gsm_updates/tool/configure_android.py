@@ -9,10 +9,11 @@ ET.register_namespace('android', ns[1:-1])
 p = android / 'AndroidManifest.xml'
 tree = ET.parse(p)
 m = tree.getroot()
+# READ_SMS (чтение базы сообщений) не нужен и не допускается; только RECEIVE_SMS для новых SMS.
 for e in list(m.findall('uses-permission')):
     if e.get(ns+'name') in ['android.permission.RECEIVE_SMS','android.permission.READ_SMS']:
         m.remove(e)
-for permission in ['POST_NOTIFICATIONS','SCHEDULE_EXACT_ALARM','RECEIVE_BOOT_COMPLETED','VIBRATE']:
+for permission in ['POST_NOTIFICATIONS','SCHEDULE_EXACT_ALARM','RECEIVE_BOOT_COMPLETED','VIBRATE','RECEIVE_SMS']:
     ET.SubElement(m, 'uses-permission', {ns+'name': 'android.permission.'+permission})
 queries = m.find('queries')
 if queries is None: queries = ET.SubElement(m, 'queries')
@@ -26,6 +27,10 @@ a.set(ns+'icon', '@mipmap/ic_launcher')
 a.set(ns+'roundIcon', '@mipmap/ic_launcher')
 for receiver in list(a.findall('receiver')):
     if receiver.get(ns+'name') == '.SmsReceiver': a.remove(receiver)
+sms = ET.SubElement(a, 'receiver', {ns+'name': '.SmsReceiver', ns+'exported': 'true',
+                                    ns+'permission': 'android.permission.BROADCAST_SMS'})
+sms_filter = ET.SubElement(sms, 'intent-filter')
+ET.SubElement(sms_filter, 'action', {ns+'name': 'android.provider.Telephony.SMS_RECEIVED'})
 ET.SubElement(a, 'receiver', {ns+'name': '.AlarmReceiver', ns+'exported':'false'})
 r = ET.SubElement(a, 'receiver', {ns+'name': '.AlarmRestoreReceiver', ns+'exported':'false'})
 f = ET.SubElement(r, 'intent-filter')
@@ -35,8 +40,8 @@ tree.write(p, encoding='unicode')
 kotlin = android/'kotlin/ru/larincold/larin_cold_gsm_control'
 kotlin.mkdir(parents=True, exist_ok=True)
 for source in (root/'native').glob('*.kt'):
-    if source.name != 'SmsReceiver.kt': shutil.copy2(source, kotlin/source.name)
-(kotlin/'SmsReceiver.kt').unlink(missing_ok=True)
+    shutil.copy2(source, kotlin/source.name)
+assert (kotlin/'SmsReceiver.kt').exists(), 'SmsReceiver.kt not copied'
 # Native vector icon: large power symbol and three GSM bars, inside adaptive safe zone.
 res = android/'res'
 for folder in ['drawable', 'mipmap-anydpi', 'mipmap-anydpi-v26']:
@@ -84,8 +89,10 @@ assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.4.9+149', s, flags=re.M))
-assert not any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.5.0+150', s, flags=re.M))
+assert any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
+assert not any(e.get(ns+'name') == 'android.permission.READ_SMS' for e in m.findall('uses-permission'))
+assert m.find("./application/receiver[@{0}name='.SmsReceiver']".format(ns)).get(ns+'permission') == 'android.permission.BROADCAST_SMS'
 assert a.get(ns+'label') == 'LARIN GSM'
 print('Android SMS receiver, permission, launcher icon and version configured')
 

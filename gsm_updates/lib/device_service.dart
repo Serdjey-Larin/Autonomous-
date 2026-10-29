@@ -18,7 +18,19 @@ class VehicleConfig {
     this.reminderMinutes,
     this.pendingCommand,
     this.pendingSince,
-
+    this.startMs,
+    this.basis,
+    this.outState,
+    this.outAt,
+    this.battery,
+    this.leftMin,
+    this.timeMin,
+    this.lastReply,
+    this.lastReplyAt,
+    this.awaitCmd,
+    this.awaitSince,
+    this.ackCmd,
+    this.ackAt,
   });
 
   String id;
@@ -27,18 +39,54 @@ class VehicleConfig {
   int? reminderMinutes;
   String? pendingCommand;
   int? pendingSince;
+
+  // --- Расчётный отсчёт: endMs/cycleMinutes выше, плюс начало и источник. ---
+  /// Начало текущего цикла (для пересчёта при TIME во время работы).
+  int? startMs;
+  /// Источник расчёта: 'user' — по «Да, отправил», 'status' — по ответу STATUS.
+  String? basis;
+
+  // --- Последний ответ STATUS: единственный источник состояния выхода. ---
+  /// 'on' | 'off' | null (неизвестно).
+  String? outState;
+  /// Время получения этого STATUS, мс.
+  int? outAt;
+  double? battery;
+  int? leftMin;
+  int? timeMin;
+
+  // --- Связь с модулем. ---
+  String? lastReply;
+  int? lastReplyAt;
+  /// Команда, отправку которой подтвердил пользователь и на которую ждём ответ.
+  String? awaitCmd;
+  int? awaitSince;
+  /// Команда, на которую модуль ответил OK (только если ожидалась одна).
+  String? ackCmd;
+  int? ackAt;
   int secondsLeft(DateTime now) => endMs == null ? 0 : ((endMs! - now.millisecondsSinceEpoch) / 1000).ceil().clamp(0, cycleMinutes * 60);
   Map<String, dynamic> toJson() => {'id': id, 'deviceNumber': deviceNumber, 'ownerNumber': ownerNumber,
     'vehicleName': vehicleName, 'durationMinutes': durationMinutes, 'ussdCode': ussdCode,
     'endMs': endMs, 'cycleMinutes': cycleMinutes, 'reminderMinutes': reminderMinutes,
-    'pendingCommand': pendingCommand, 'pendingSince': pendingSince};
+    'pendingCommand': pendingCommand, 'pendingSince': pendingSince,
+    'startMs': startMs, 'basis': basis, 'outState': outState, 'outAt': outAt,
+    'battery': battery, 'leftMin': leftMin, 'timeMin': timeMin,
+    'lastReply': lastReply, 'lastReplyAt': lastReplyAt, 'awaitCmd': awaitCmd,
+    'awaitSince': awaitSince, 'ackCmd': ackCmd, 'ackAt': ackAt};
   factory VehicleConfig.fromJson(Map<String, dynamic> j) => VehicleConfig(
     id: j['id'] as String, deviceNumber: j['deviceNumber'] as String? ?? '',
     ownerNumber: j['ownerNumber'] as String? ?? '', vehicleName: j['vehicleName'] as String? ?? 'Автомобиль',
     durationMinutes: j['durationMinutes'] as int? ?? 30, ussdCode: j['ussdCode'] as String? ?? '',
     endMs: j['endMs'] as int?, cycleMinutes: j['cycleMinutes'] as int? ?? 30,
     reminderMinutes: j['reminderMinutes'] as int?, pendingCommand: j['pendingCommand'] as String?,
-    pendingSince: j['pendingSince'] as int?);
+    pendingSince: j['pendingSince'] as int?,
+    startMs: j['startMs'] as int?, basis: j['basis'] as String?,
+    outState: j['outState'] as String?, outAt: j['outAt'] as int?,
+    battery: (j['battery'] as num?)?.toDouble(), leftMin: j['leftMin'] as int?,
+    timeMin: j['timeMin'] as int?, lastReply: j['lastReply'] as String?,
+    lastReplyAt: j['lastReplyAt'] as int?, awaitCmd: j['awaitCmd'] as String?,
+    awaitSince: j['awaitSince'] as int?, ackCmd: j['ackCmd'] as String?,
+    ackAt: j['ackAt'] as int?);
   String deviceNumber;
   String ownerNumber;
   String vehicleName;
@@ -70,6 +118,10 @@ class DeviceService {
     final old = await load();
     return (cars: [old], selected: old.id);
   }
+  /// Номер последней обработанной записи журнала входящих SMS.
+  Future<int> lastSmsSeq() async => await _prefs.getInt('smsSeq150') ?? 0;
+  Future<void> setLastSmsSeq(int seq) => _prefs.setInt('smsSeq150', seq);
+
   Future<void> saveGarage(List<VehicleConfig> cars, String selected) =>
     _prefs.setString('garage149', jsonEncode({'cars': cars.map((c) => c.toJson()).toList(), 'selected': selected}));
 

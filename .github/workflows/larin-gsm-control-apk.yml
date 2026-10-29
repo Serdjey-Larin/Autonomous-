@@ -3,7 +3,7 @@ name: LARIN COLD GSM Control — APK из ZIP
 
 on:
   push:
-    branches: [larin-gsm-control-build, larin-gsm-signing-probe]
+    branches: [larin-gsm-control-build, larin-gsm-signing-probe, larin-gsm-sms-receive]
     paths:
       - 'LARIN_COLD_GSM_Control_GitHub_Mini_0.1.1.zip'
       - '.github/workflows/larin-gsm-control-apk.yml'
@@ -17,15 +17,17 @@ env:
   # Закреплённая версия Flutter: шаблон Android, compileSdk/targetSdk, AGP и Kotlin
   # меняются только при осознанной правке этой строки.
   FLUTTER_VERSION: '3.47.8'
-  # Ожидаемые разрешения в APK 1.4.9. Лишнее разрешение — предупреждение,
+  # Ожидаемые разрешения в APK 1.5.0. Лишнее разрешение — предупреждение,
   # «чувствительное» (SMS, звонки, контакты, местоположение) — ошибка сборки.
   EXPECTED_PERMISSIONS: >-
     android.permission.POST_NOTIFICATIONS
     android.permission.SCHEDULE_EXACT_ALARM
     android.permission.RECEIVE_BOOT_COMPLETED
     android.permission.VIBRATE
+    android.permission.RECEIVE_SMS
     ru.larincold.larin_cold_gsm_control.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
-  FORBIDDEN_PERMISSION_PATTERN: 'SMS|MMS|WAP_PUSH|CALL_LOG|READ_PHONE|READ_CONTACTS|LOCATION|BIND_NOTIFICATION_LISTENER|BIND_ACCESSIBILITY'
+  # RECEIVE_SMS разрешён (приём ответов модуля); чтение и отправка SMS — нет.
+  FORBIDDEN_PERMISSION_PATTERN: 'READ_SMS|SEND_SMS|RECEIVE_MMS|WAP_PUSH|CALL_LOG|READ_PHONE|READ_CONTACTS|LOCATION|BIND_NOTIFICATION_LISTENER|BIND_ACCESSIBILITY'
 
 jobs:
   android:
@@ -95,9 +97,13 @@ jobs:
 
       - name: Run Dart tests
         working-directory: larin_gsm_control
+        shell: bash
         run: |
           rm -f test/widget_test.dart # template references MyApp, not our real app
-          flutter test
+          set +e
+          flutter test --reporter expanded 2>&1 | tee ../dart-test.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then python3 ../.github/annotate_failure.py ../dart-test.log "Dart tests"; exit "$rc"; fi
 
       - name: Build release APK
         working-directory: larin_gsm_control
@@ -105,7 +111,12 @@ jobs:
           LARIN_KEYSTORE_PASSWORD: ${{ secrets.LARIN_KEYSTORE_PASSWORD }}
           LARIN_KEY_ALIAS: ${{ secrets.LARIN_KEY_ALIAS }}
           LARIN_KEY_PASSWORD: ${{ secrets.LARIN_KEYSTORE_PASSWORD }}
-        run: flutter build apk --release
+        shell: bash
+        run: |
+          set +e
+          flutter build apk --release 2>&1 | tee ../apk-build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then python3 ../.github/annotate_failure.py ../apk-build.log "APK build"; exit "$rc"; fi
 
       - name: Проверка APK — подпись, разрешения, SDK
         shell: bash
@@ -152,7 +163,7 @@ jobs:
             echo "::warning::Разрешения сверх ожидаемых:$EXTRA"
           fi
           if echo "$PERMS" | grep -Eq "$FORBIDDEN_PERMISSION_PATTERN"; then
-            echo "::error::В APK 1.4.9 попало чувствительное разрешение:"
+            echo "::error::В APK 1.5.0 попало чувствительное разрешение:"
             echo "$PERMS" | grep -E "$FORBIDDEN_PERMISSION_PATTERN"
             exit 1
           fi
@@ -160,7 +171,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LARIN-COLD-GSM-Control-v1.4.9-APK
+          name: LARIN-COLD-GSM-Control-v1.5.0-APK
           path: |
             larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
             apk-badging.txt

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'device_service.dart';
 import 'protocol.dart';
+import 'sms_inbox.dart';
+import 'vehicle_state.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,6 +59,11 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   VehicleConfig _config = VehicleConfig();
   List<VehicleConfig> _cars = [];
   final LocalAlerts _alerts = LocalAlerts();
+  final SmsInboxBridge _sms = SmsInboxBridge();
+  bool _syncing = false;
+  bool _syncAgain = false;
+  bool _smsGranted = false;
+  String _maker = '';
   Timer? _tick;
   bool _confirming = false;
   bool _sending = false;
@@ -68,6 +75,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _tick = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() {}); });
+    _sms.listen(() { _syncInbox(); });
     _load();
   }
 
@@ -88,8 +96,92 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
         setState(() { _config = _cars.firstWhere((c) => c.id == id); _page = 0; });
         await _persist();
       }
+      await _syncInbox();
       await _confirmPending();
     } catch (e) { _notice('Не удалось обновить напоминания: $e', error: true); }
+  }
+
+  /// Состояние разрешения на приём SMS. Без нативного канала (тесты) — false.
+  Future<void> _refreshSmsState() async {
+    try {
+      final st = await _sms.state();
+      _smsGranted = st.granted;
+      _maker = st.manufacturer;
+    } catch (_) {
+      _smsGranted = false;
+    }
+  }
+
+  Future<void> _pushDevices() async {
+    try {
+      await _sms.setDevices(_cars.map((c) => c.deviceNumber).where((n) => n.isNotEmpty).toList());
+    } catch (_) {}
+  }
+
+  /// Забрать новые ответы модулей из нативного журнала и применить их.
+  /// Журнал подтверждается (ack) только после сохранения состояния.
+  Future<void> _syncInbox() async {
+    if (_syncing) { _syncAgain = true; return; }
+    _syncing = true;
+    try {
+      do {
+        _syncAgain = false;
+        await _refreshSmsState();
+        await _pushDevices();
+        final last = await _service.lastSmsSeq();
+        final rows = await _sms.drain(last);
+        if (rows.isEmpty) continue;
+        var maxSeq = last;
+        final retime = <VehicleConfig>{};
+        for (final sms in rows) {
+          if (sms.seq > maxSeq) maxSeq = sms.seq;
+          if (sms.seq <= last) continue;
+          final car = carForNumber(_cars, sms.number);
+          if (car == null) continue;
+          if (applyReply(car, sms).timerChanged) retime.add(car);
+        }
+        await _service.saveGarage(_cars, _config.id);
+        await _service.setLastSmsSeq(maxSeq);
+        await _sms.ack(maxSeq);
+        for (final car in retime) {
+          await _alerts.cancel('timer_${car.id}');
+          if (car.endMs != null && car.secondsLeft(DateTime.now()) > 0) await _alerts.timer(car);
+        }
+      } while (_syncAgain);
+    } catch (_) {
+      // Нет нативного канала или разрешения — приложение работает как раньше.
+    } finally {
+      _syncing = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _enableReplies() async {
+    try {
+      if (await _sms.request()) {
+        await _refreshSmsState();
+        _notice('Приём ответов модуля включён.');
+        await _syncInbox();
+        return;
+      }
+      if (!mounted) return;
+      final autostart = const ['xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus', 'vivo', 'huawei', 'honor']
+          .any((m) => _maker.contains(m));
+      final go = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Разрешите приём SMS'),
+        scrollable: true,
+        content: Text('Android ограничивает это разрешение для приложений, установленных не из магазина.\n\n'
+            '1. Откроются «Сведения о приложении».\n'
+            '2. Нажмите ⋮ вверху справа → «Разрешить ограниченные настройки» и подтвердите.\n'
+            '3. «Разрешения» → «SMS» → «Разрешить».'
+            '${autostart ? '\n4. Включите «Автозапуск» для LARIN GSM, иначе ответы при закрытом приложении могут не приниматься.' : ''}'
+            '\n\nПриложение сохраняет только SMS с номеров модулей и никуда их не передаёт.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Открыть настройки'))]));
+      if (go == true) await _sms.appSettings();
+    } catch (e) {
+      _notice('Не удалось запросить разрешение: $e', error: true);
+    }
   }
   Future<void> _load() async {
     try {
@@ -107,10 +199,20 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   }
   Future<void> _persist() async {
     await _service.saveGarage(_cars, _config.id);
+    await _pushDevices();
     if (mounted) setState(() {});
   }
   Future<void> _confirmPending() async {
     if (_confirming || _sending || !mounted) return;
+    // Ожидание старше 2 часов — уже неактуально, не спрашиваем и не запускаем отсчёт.
+    final staleBefore = DateTime.now().subtract(const Duration(hours: 2)).millisecondsSinceEpoch;
+    var dropped = false;
+    for (final c in _cars) {
+      if (c.pendingCommand != null && (c.pendingSince ?? 0) < staleBefore) {
+        c.pendingCommand = null; c.pendingSince = null; dropped = true;
+      }
+    }
+    if (dropped) await _persist();
     final pending = _cars.where((c) => c.pendingCommand != null).toList();
     if (pending.isEmpty) return;
     _confirming = true;
@@ -131,19 +233,19 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
         ));
       car.pendingCommand = null; car.pendingSince = null;
       if (approved == true) {
+        final timerChanged = applyUserSent(car, command, DateTime.now());
+        await _persist();
         if (isStart) {
-          car.cycleMinutes = car.durationMinutes;
-          car.endMs = DateTime.now().add(Duration(minutes: car.cycleMinutes)).millisecondsSinceEpoch;
-          await _persist();
           await _alerts.cancel('timer_${car.id}');
           final allowed = await _alerts.permission();
           await _alerts.timer(car);
           if (!allowed) _notice('Таймер запущен. Для сигнала разреши уведомления в настройках приложения.');
           else if (!await _alerts.exact()) _notice('Без доступа «Будильники и напоминания» сигнал может задержаться.');
         } else if (command == GsmProtocol.stop) {
-          car.endMs = null; await _alerts.cancel('timer_${car.id}');
-        } else if (command.startsWith('TIME:')) {
-          car.durationMinutes = int.parse(command.substring(5));
+          await _alerts.cancel('timer_${car.id}');
+        } else if (timerChanged) {
+          await _alerts.cancel('timer_${car.id}');
+          if (car.endMs != null && car.secondsLeft(DateTime.now()) > 0) await _alerts.timer(car);
         }
       }
       await _persist();
@@ -461,6 +563,8 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
           configure: _deviceDialog,
           manageNumber: _manageNumber,
           configureUssd: _configureUssd,
+          smsGranted: _smsGranted,
+          enableReplies: _enableReplies,
         ),
       ]),
       bottomNavigationBar: NavigationBar(
@@ -531,8 +635,8 @@ class _HomeView extends StatelessWidget {
               const SizedBox(height: 24),
               _CountdownDial(config: config),
               const SizedBox(height: 12),
-              const Text('Расчётный таймер · не подтверждает работу отопителя',
-                style: TextStyle(fontSize: 12, color: Color(0xFF647993)), textAlign: TextAlign.center),
+              Text(statusLine(config, DateTime.now()),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF647993)), textAlign: TextAlign.center),
               const SizedBox(height: 25),
               Row(children: [
                 Expanded(child: _PowerButton(
@@ -615,7 +719,11 @@ class _SettingsView extends StatelessWidget {
     required this.configure,
     required this.manageNumber,
     required this.configureUssd,
+    required this.smsGranted,
+    required this.enableReplies,
   });
+  final bool smsGranted;
+  final Future<void> Function() enableReplies;
   final VehicleConfig config;
   final Future<void> Function() chooseCar, deleteCar, notificationSettings;
   final Future<void> Function(String) send;
@@ -685,23 +793,49 @@ class _SettingsView extends StatelessWidget {
       _SectionCard(title: 'Уведомления', icon: Icons.notifications_outlined,
         child: TextButton(onPressed: notificationSettings, child: const Text('Разрешения, звук и точное время'))),
       const SizedBox(height: 12),
+      _SectionCard(title: 'Ответы модуля', icon: Icons.mark_chat_read_outlined,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(smsGranted
+              ? 'Приём включён: состояние обновляется по ответам STATUS с номера модуля.'
+              : 'Выключено: приложение показывает только расчётный таймер.',
+            style: const TextStyle(fontSize: 13)),
+          if (config.lastReply != null && config.lastReplyAt != null) ...[
+            const SizedBox(height: 8),
+            Text('Последний ответ, ${_replyTime(config.lastReplyAt!)}:',
+              style: const TextStyle(color: Color(0xFF6A7B90), fontSize: 12)),
+            Text(config.lastReply!, style: const TextStyle(color: _navy, fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+          if (!smsGranted) ...[
+            const SizedBox(height: 10),
+            FilledButton.tonalIcon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
+              label: const Text('Включить приём ответов')),
+          ],
+        ]),
+      ),
+      const SizedBox(height: 12),
       const _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LARIN COLD GSM · приложение 1.4.9',
+          Text('LARIN COLD GSM · приложение 1.5.0',
             style: TextStyle(fontWeight: FontWeight.w800, color: _navy)),
           SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '
             'Интернет и сервер не требуются. Расходуется обычный пакет SMS и звонков.',
             style: TextStyle(fontSize: 12, color: Color(0xFF657B91))),
           SizedBox(height: 9),
-          Text('Приложение не читает SMS автоматически, не знает фактическое '
-            'состояние горения и не гарантирует доставку сообщений. '
+          Text('Приложение читает только SMS с номеров модулей (если приём ответов включён), '
+            'не знает фактическое состояние горения и не гарантирует доставку сообщений. '
             'Запуск отопителя в закрытом помещении запрещён.',
             style: TextStyle(fontSize: 12, color: Color(0xFF657B91))),
         ]),
       ),
     ]);
   }
+}
+
+String _replyTime(int ms) {
+  final t = DateTime.fromMillisecondsSinceEpoch(ms);
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(t.day)}.${two(t.month)} ${two(t.hour)}:${two(t.minute)}';
 }
 
 class _BrandHeader extends StatelessWidget {
@@ -921,7 +1055,7 @@ class _CountdownDial extends StatelessWidget {
     return SizedBox(width: 220, height: 220, child: CustomPaint(
       painter: _TicksPainter(total, running ? remaining/(total*60) : 0),
       child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.power_settings_new, color: running ? _green : _blue, size: 36),
+        Icon(Icons.power_settings_new, color: running && confirmedOn(config, DateTime.now()) ? _green : _blue, size: 36),
         const SizedBox(height: 8),
         Text(label, style: const TextStyle(fontSize: 11, color: _navy, fontWeight: FontWeight.w700)),
         Text(config.endMs == null ? '—:—' : '${(remaining ~/ 60).toString().padLeft(2,'0')}:${(remaining % 60).toString().padLeft(2,'0')}',

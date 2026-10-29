@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,8 +15,12 @@ import org.json.JSONObject
 
 class MainActivity : FlutterActivity() {
     private var pending: MethodChannel.Result? = null
+    private var smsPending: MethodChannel.Result? = null
+    private var smsChannel: MethodChannel? = null
+    private val main = Handler(Looper.getMainLooper())
     private fun allowed() = (Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) &&
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).areNotificationsEnabled()
+    private fun smsAllowed() = checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent) }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -41,10 +47,47 @@ class MainActivity : FlutterActivity() {
                 }
             } catch(e: Exception) { result.error("alerts",e.message,null) }
         }
+
+        // Приём ответов модуля (RECEIVE_SMS). Текст разбирает Dart.
+        val sms = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ru.larincold/sms")
+        smsChannel = sms
+        SmsInbox.listener = { main.post { smsChannel?.invokeMethod("inboxChanged", null) } }
+        sms.setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "setDevices" -> {
+                        SmsInbox.setDevices(this, call.argument<List<String>>("numbers") ?: emptyList())
+                        result.success(null)
+                    }
+                    "drain" -> result.success(SmsInbox.drain(this, (call.argument<Number>("after") ?: 0).toLong()))
+                    "ack" -> { SmsInbox.ack(this, (call.argument<Number>("seq") ?: 0).toLong()); result.success(null) }
+                    "state" -> result.success(mapOf(
+                        "granted" to smsAllowed(),
+                        "manufacturer" to Build.MANUFACTURER.lowercase(),
+                        "sdk" to Build.VERSION.SDK_INT))
+                    "request" -> {
+                        if (smsAllowed()) result.success(true)
+                        else if (smsPending != null) result.success(false)
+                        else { smsPending = result; requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), 150) }
+                    }
+                    "appSettings" -> {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) { result.error("sms", e.message, null) }
+        }
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode,permissions,grantResults)
         if(requestCode==149){pending?.success(allowed());pending=null}
+        if(requestCode==150){smsPending?.success(smsAllowed());smsPending=null}
     }
-    override fun onDestroy(){pending?.success(false);pending=null;super.onDestroy()}
+    override fun onDestroy(){
+        pending?.success(false);pending=null
+        smsPending?.success(false);smsPending=null
+        SmsInbox.listener = null; smsChannel = null
+        super.onDestroy()
+    }
 }

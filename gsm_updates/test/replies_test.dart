@@ -1,0 +1,130 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:larin_cold_gsm_control/device_service.dart';
+import 'package:larin_cold_gsm_control/reply_parser.dart';
+import 'package:larin_cold_gsm_control/vehicle_state.dart';
+
+// Реальные ответы модуля, снятые пробой 29.10.2026.
+const statusOff = 'LARIN COLD\nHeater: OFF\nLeft: 0 min\nBattery: 14.6 V\nTime: 30 min';
+const statusOn = 'LARIN COLD\nHeater: ON\nLeft: 14 min\nBattery: 14.6 V\nTime: 30 min';
+const balance = 'USSD: Vaw balans: 13 rub.';
+
+InboundSms sms(int seq, String number, String body, DateTime at) => InboundSms(
+    seq: seq, number: number, body: body,
+    smscMs: at.millisecondsSinceEpoch, receivedMs: at.millisecondsSinceEpoch + 4000);
+
+void main() {
+  group('parseReply', () {
+    test('STATUS OFF from the real module', () {
+      final p = parseReply(statusOff);
+      expect(p.kind, ReplyKind.status);
+      expect(p.status!.on, isFalse);
+      expect(p.status!.timeMinutes, 30);
+      expect(p.status!.battery, 14.6);
+    });
+    test('STATUS ON with CRLF, comma and odd spacing', () {
+      final p = parseReply('LARIN COLD\r\nheater:on\r\nLeft:  7 min\r\nBattery: 12,4 V\r\nTime:45 min');
+      expect(p.kind, ReplyKind.status);
+      expect(p.status!.on, isTrue);
+      expect(p.status!.leftMinutes, 7);
+      expect(p.status!.battery, 12.4);
+    });
+    test('OK and other replies', () {
+      expect(parseReply(' ok \n').kind, ReplyKind.ok);
+      expect(parseReply(balance).kind, ReplyKind.other);
+    });
+    test('implausible STATUS is rejected', () {
+      expect(parseReply('Heater: ON\nLeft: 50 min\nTime: 30 min').kind, ReplyKind.invalid);
+      expect(parseReply('Heater: ON\nTime: 30 min').kind, ReplyKind.invalid);
+      expect(parseReply('Heater: ON\nLeft: 5 min\nBattery: 99 V\nTime: 30 min').kind, ReplyKind.invalid);
+    });
+    test('canonical numbers match only in full', () {
+      expect(canonicalNumber('8 (928) 105-02-33'), '+79281050233');
+      expect(canonicalNumber('+79281050233'), '+79281050233');
+      expect(canonicalNumber('105-02-33'), '');
+    });
+  });
+
+  group('applyReply', () {
+    final t0 = DateTime(2026, 10, 29, 7, 0);
+
+    test('STATUS ON corrects the countdown from Left and Time', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30);
+      final r = applyReply(car, sms(1, '+79281050233', statusOn, t0));
+      expect(r.timerChanged, isTrue);
+      expect(car.outState, 'on');
+      expect(car.basis, 'status');
+      expect(car.endMs, t0.millisecondsSinceEpoch + 14 * 60000);
+      expect(car.cycleMinutes, 30);
+      expect(confirmedOn(car, t0.add(const Duration(minutes: 1))), isTrue);
+    });
+
+    test('STATUS OFF stops the countdown', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyUserSent(car, 'START', t0);
+      expect(car.endMs, isNotNull);
+      applyReply(car, sms(1, '+79281050233', statusOff, t0.add(const Duration(minutes: 2))));
+      expect(car.endMs, isNull);
+      expect(car.outState, 'off');
+      expect(car.awaitCmd, isNull);
+    });
+
+    test('a delayed older STATUS does not overwrite a newer one', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, sms(2, '+79281050233', statusOff, t0.add(const Duration(minutes: 5))));
+      applyReply(car, sms(3, '+79281050233', statusOn, t0));
+      expect(car.outState, 'off');
+    });
+
+    test('OK confirms only the single awaited command', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyUserSent(car, 'START', t0);
+      applyReply(car, sms(1, '+79281050233', 'OK', t0.add(const Duration(minutes: 1))));
+      expect(car.ackCmd, 'START');
+      expect(car.outState, isNull, reason: 'OK is not proof of the output state');
+      expect(statusLine(car, t0.add(const Duration(minutes: 2))), contains('Модуль принял START'));
+      // Second unexpected OK is ambiguous.
+      applyReply(car, sms(2, '+79281050233', 'OK', t0.add(const Duration(minutes: 3))));
+      expect(car.ackCmd, '?');
+    });
+
+    test('a reply for one car never changes another car', () {
+      final a = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      final b = VehicleConfig(id: 'b', deviceNumber: '+79281050234');
+      final cars = [a, b];
+      final m = sms(1, '89281050234', statusOn, t0);
+      final car = carForNumber(cars, m.number);
+      expect(car, same(b));
+      applyReply(car!, m);
+      expect(a.outState, isNull);
+      expect(b.outState, 'on');
+      expect(carForNumber(cars, '+79991050233'), isNull);
+    });
+
+    test('TIME during an active cycle is counted from the original start', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30);
+      applyUserSent(car, 'START', t0);
+      final changed = applyUserSent(car, 'TIME:60', t0.add(const Duration(minutes: 10)));
+      expect(changed, isTrue);
+      expect(car.cycleMinutes, 60);
+      expect(car.endMs, t0.millisecondsSinceEpoch + 60 * 60000);
+    });
+
+    test('status line never claims the heater runs without STATUS', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyUserSent(car, 'START', t0);
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'START отправлен · ждём ответ модуля');
+      expect(statusLine(car, t0.add(const Duration(minutes: 20))), contains('Ответа на START нет'));
+      expect(confirmedOn(car, t0.add(const Duration(minutes: 1))), isFalse);
+    });
+
+    test('state survives JSON round trip', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, sms(1, '+79281050233', statusOn, t0));
+      final back = VehicleConfig.fromJson(car.toJson());
+      expect(back.outState, 'on');
+      expect(back.battery, 14.6);
+      expect(back.endMs, car.endMs);
+      expect(back.basis, 'status');
+    });
+  });
+}
