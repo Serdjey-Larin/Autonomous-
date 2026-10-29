@@ -233,6 +233,13 @@ void main() {
       car.balanceRub = -5.2;
       expect(balanceAmount(car), '−5,20 ₽');
     });
+    test('balance is always shown in rubles', () {
+      expect(parseReply('USSD: Balans 250.50 RUR').balance, 250.5);
+      expect(parseReply('Баланс: -5,20р').balance, -5.2);
+      expect(parseReply('USSD: Vash balans 87').balance, 87);
+      final car = VehicleConfig(id: 'a', balanceRub: 250.5, balanceAt: 1);
+      expect(balanceAmount(car), '250,50 ₽');
+    });
     test('winter snow season is 1 December – 30 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
       expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);

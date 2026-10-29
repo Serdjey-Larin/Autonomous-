@@ -41,7 +41,9 @@ final _time = RegExp(r'Time\s*:\s*(\d{1,3})\s*min', caseSensitive: false);
 // Ответ на BALANCE: модуль пересылает USSD-ответ оператора, например
 // «USSD: Vaw balans: 13 rub.» Сумма — число перед «rub/руб/р/₽».
 final _balanceHint = RegExp(r'^USSD\s*:|balans|баланс|balance', caseSensitive: false);
-final _amount = RegExp(r'(-?\d+(?:[.,]\d{1,2})?)\s*(?:rub|руб|р\.|₽)', caseSensitive: false);
+final _amount = RegExp(r'(-?\d+(?:[.,]\d{1,2})?)\s*(?:rub|rur|руб|р(?![а-яё])|₽)', caseSensitive: false);
+/// Оператор не написал валюту: берём первое число после слова «баланс».
+final _afterHint = RegExp(r'(?:balans|баланс|balance)[^\d-]{0,24}(-?\d+(?:[.,]\d{1,2})?)', caseSensitive: false);
 final _battery = RegExp(r'Battery\s*:\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*V', caseSensitive: false);
 
 ParsedReply parseReply(String body) {
@@ -51,7 +53,7 @@ ParsedReply parseReply(String body) {
   final heater = _heater.firstMatch(text);
   if (heater == null) {
     if (_balanceHint.hasMatch(text)) {
-      final m = _amount.firstMatch(text);
+      final m = _amount.firstMatch(text) ?? _afterHint.firstMatch(text);
       return ParsedReply(ReplyKind.balance,
           balance: m == null ? null : double.tryParse(m.group(1)!.replaceAll(',', '.')));
     }
