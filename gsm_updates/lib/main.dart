@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'local_alerts.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'brand.dart';
 import 'device_service.dart';
 import 'protocol.dart';
 import 'sms_inbox.dart';
@@ -13,28 +14,44 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const _blue = Color(0xFF0666BC);
-const _navy = Color(0xFF10335E);
-const _green = Color(0xFF16A65C);
-const _canvas = Color(0xFFF2F7FC);
+const appVersion = '1.6.0';
 
 class LarinGsmApp extends StatelessWidget {
   const LarinGsmApp({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final scheme = ColorScheme.fromSeed(seedColor: Brand.blue, primary: Brand.blue, surface: Colors.white);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'LARIN COLD GSM Control',
+      title: 'Larin Cold Start',
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: _canvas,
-        colorScheme: ColorScheme.fromSeed(seedColor: _blue, primary: _blue),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: _canvas,
-          foregroundColor: _navy,
+        fontFamily: brandFont,
+        scaffoldBackgroundColor: Brand.canvas,
+        colorScheme: scheme,
+        textTheme: ThemeData.light().textTheme.apply(fontFamily: brandFont, bodyColor: Brand.text, displayColor: Brand.text),
+        dialogTheme: DialogThemeData(
+          backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
-          centerTitle: false,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          titleTextStyle: brandItalic(20, weight: FontWeight.w800),
+        ),
+        filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
+          textStyle: brandItalic(15, weight: FontWeight.w800),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        )),
+        textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(
+          foregroundColor: Brand.blue, textStyle: brandText(14, weight: FontWeight.w700),
+        )),
+        switchTheme: SwitchThemeData(
+          thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
+          trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Brand.green : null),
+        ),
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          contentTextStyle: brandText(14, color: Colors.white, weight: FontWeight.w500),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
@@ -69,6 +86,8 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   bool _sending = false;
   bool _loading = true;
   int _page = 0;
+  bool _snowOn = false;
+  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
 
   @override
   void initState() {
@@ -174,7 +193,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
             '1. Откроются «Сведения о приложении».\n'
             '2. Нажмите ⋮ вверху справа → «Разрешить ограниченные настройки» и подтвердите.\n'
             '3. «Разрешения» → «SMS» → «Разрешить».'
-            '${autostart ? '\n4. Включите «Автозапуск» для LARIN GSM, иначе ответы при закрытом приложении могут не приниматься.' : ''}'
+            '${autostart ? '\n4. Включите «Автозапуск» для Larin Cold Start, иначе ответы при закрытом приложении могут не приниматься.' : ''}'
             '\n\nПриложение сохраняет только SMS с номеров модулей и никуда их не передаёт.'),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Открыть настройки'))]));
@@ -186,6 +205,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   Future<void> _load() async {
     try {
       final garage = await _service.loadGarage();
+      try { _snowOn = await _prefs.getBool('winterSnow') ?? true; } catch (_) { _snowOn = false; }
       if (!mounted) return;
       setState(() {
         _cars = garage.cars;
@@ -196,6 +216,10 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     } catch (e) {
       if (mounted) { setState(() { _cars = [_config]; _loading = false; }); _notice('Ошибка загрузки: $e', error: true); }
     }
+  }
+  Future<void> _toggleSnow(bool value) async {
+    setState(() => _snowOn = value);
+    try { await _prefs.setBool('winterSnow', value); } catch (_) {}
   }
   Future<void> _persist() async {
     await _service.saveGarage(_cars, _config.id);
@@ -324,7 +348,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(text),
-        backgroundColor: error ? const Color(0xFFAD2934) : _navy,
+        backgroundColor: error ? Brand.red : Brand.text,
         duration: const Duration(seconds: 4),
       ),
     );
@@ -378,7 +402,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
       await _alerts.cancel('timer_${car.id}');
       await _persist();
       _notice(_smsGranted
-          ? 'После звонка нажмите «Состояние» — таймер покажет точное время.'
+          ? 'После звонка нажмите ⟳ рядом с состоянием — таймер покажет точное время.'
           : 'После звонка отправьте STATUS и посмотрите ответ в переписке.');
     } catch (e) {
       _notice('$e', error: true);
@@ -542,53 +566,80 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_loading) {
+      return Scaffold(body: Center(child: Image.asset('assets/larin_cold_logo.png', width: 220,
+          errorBuilder: (context, error, stackTrace) => const SizedBox.shrink())));
+    }
+    final now = DateTime.now();
+    final snow = _snowOn && isWinterSeason(now) && !MediaQuery.of(context).disableAnimations;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('GSM CONTROL', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-        actions: [
-          IconButton(
-            onPressed: _deviceDialog,
-            tooltip: 'Настройки автомобиля',
-            icon: const Icon(Icons.tune_rounded),
-          ),
-        ],
-      ),
-      body: IndexedStack(index: _page, children: [
-        _HomeView(
-          config: _config,
-          chooseCar: _chooseCar,
-          openMessages: _openMessages,
-          confirmPending: () => _confirmPending(manual: true),
-          reminder: _reminder,
-          send: _send,
-          call: _makeCall,
-          configure: _deviceDialog,
-          setTime: _setTime,
-        ),
-        _SettingsView(
-          config: _config,
-          chooseCar: _chooseCar,
-          deleteCar: _deleteCar,
-          notificationSettings: _notificationSettings,
-          send: _send,
-          configure: _deviceDialog,
-          manageNumber: _manageNumber,
-          configureUssd: _configureUssd,
-          smsGranted: _smsGranted,
-          enableReplies: _enableReplies,
+      body: Stack(children: [
+        const Positioned.fill(child: SpeedStreaks()),
+        if (snow) const Positioned.fill(child: Snowfall()),
+        SafeArea(
+          bottom: false,
+          child: IndexedStack(index: _page, children: [
+            _HomeView(
+              config: _config,
+              now: now,
+              chooseCar: _chooseCar,
+              openMessages: _openMessages,
+              confirmPending: () => _confirmPending(manual: true),
+              reminder: _reminder,
+              send: _send,
+              call: _makeCall,
+              configure: _deviceDialog,
+              setTime: _setTime,
+            ),
+            _SettingsView(
+              config: _config,
+              chooseCar: _chooseCar,
+              deleteCar: _deleteCar,
+              notificationSettings: _notificationSettings,
+              send: _send,
+              configure: _deviceDialog,
+              manageNumber: _manageNumber,
+              configureUssd: _configureUssd,
+              smsGranted: _smsGranted,
+              enableReplies: _enableReplies,
+              snowOn: _snowOn,
+              toggleSnow: _toggleSnow,
+            ),
+          ]),
         ),
       ]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _page,
-        onDestinationSelected: (value) => setState(() => _page = value),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.heat_pump_outlined),
-            selectedIcon: Icon(Icons.heat_pump_rounded), label: 'Управление'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings), label: 'Настройки'),
-        ],
-      ),
+      bottomNavigationBar: _BottomBar(page: _page, select: (value) => setState(() => _page = value)),
+    );
+  }
+}
+
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({required this.page, required this.select});
+  final int page;
+  final ValueChanged<int> select;
+  @override
+  Widget build(BuildContext context) {
+    Widget item(int index, String label, Widget Function(Color) icon) {
+      final active = page == index;
+      final color = active ? Brand.blue : Brand.muted;
+      return Expanded(child: Semantics(
+        button: true, selected: active, label: label,
+        child: InkWell(
+          onTap: () => select(index),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            icon(color),
+            const SizedBox(height: 3),
+            Text(label, style: active ? brandItalic(13, color: color, weight: FontWeight.w800) : brandText(13, color: color)),
+          ]),
+        ),
+      ));
+    }
+    return Container(
+      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFE2F0FC), width: 2))),
+      child: SafeArea(top: false, child: SizedBox(height: 64, child: Row(children: [
+        item(0, 'Управление', (c) => PowerGlyph(size: 22, color: c, width: 2.4)),
+        item(1, 'Настройки', (c) => Icon(Icons.settings_outlined, color: c, size: 23)),
+      ]))),
     );
   }
 }
@@ -596,6 +647,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
 class _HomeView extends StatelessWidget {
   const _HomeView({
     required this.config,
+    required this.now,
     required this.chooseCar,
     required this.openMessages,
     required this.confirmPending,
@@ -606,6 +658,7 @@ class _HomeView extends StatelessWidget {
     required this.setTime,
   });
   final VehicleConfig config;
+  final DateTime now;
   final Future<void> Function() chooseCar, openMessages, reminder, confirmPending;
   final Future<void> Function(String) send;
   final Future<void> Function() call;
@@ -616,109 +669,306 @@ class _HomeView extends StatelessWidget {
   Widget build(BuildContext context) {
     final configured = GsmProtocol.validPhone(config.deviceNumber);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
-        _BrandHeader(vehicle: config.vehicleName),
-        Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: chooseCar,
-          icon: const Icon(Icons.swap_horiz),label: const Text('Выбрать автомобиль'))),
-        const SizedBox(height: 14),
+        _Header(vehicle: config.vehicleName, chooseCar: chooseCar, call: call),
         if (!configured) ...[
+          const SizedBox(height: 8),
           _InfoStrip(
             color: const Color(0xFFFFF4DD),
             icon: Icons.info_outline,
-            message: 'Сначала укажи номер SIM-карты устройства.',
+            message: 'Сначала укажите номер SIM-карты модуля.',
             action: TextButton(onPressed: configure, child: const Text('Настроить')),
           ),
-          const SizedBox(height: 14),
         ],
-        if (config.pendingCommand != null) ...[
-          FilledButton.tonal(onPressed: confirmPending, child: const Text('Подтвердить отправку SMS')),
-          const SizedBox(height: 10),
-        ],
-        Card(
-          elevation: 0,
-          color: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 22, 18, 22),
-            child: Column(children: [
-              const Text('АВТОНОМНЫЙ ОТОПИТЕЛЬ',
-                style: TextStyle(color: Color(0xFF7388A0), fontSize: 12, letterSpacing: 1.4, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 24),
-              _CountdownDial(config: config),
-              const SizedBox(height: 12),
-              Text(statusLine(config, DateTime.now()),
-                style: const TextStyle(fontSize: 12, color: Color(0xFF647993)), textAlign: TextAlign.center),
-              const SizedBox(height: 25),
-              Row(children: [
-                Expanded(child: _PowerButton(
-                  label: 'ЗАПУСК', symbol: _PowerSymbol.start,
-                  color: _green, onPressed: () => send(GsmProtocol.start),
-                )),
-                const SizedBox(width: 12),
-                Expanded(child: _PowerButton(
-                  label: 'ОСТАНОВКА', symbol: _PowerSymbol.stop,
-                  color: const Color(0xFFC44651), onPressed: () => send(GsmProtocol.stop),
-                )),
-              ]),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 14),
-        _SectionCard(
-          title: 'Время работы', icon: Icons.timer_outlined,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Выбранное время', style: TextStyle(color: _navy, fontWeight: FontWeight.w600)),
-              Text('${config.durationMinutes} мин', style: const TextStyle(
-                color: _blue, fontSize: 20, fontWeight: FontWeight.w900)),
-            ]),
-            const SizedBox(height: 11),
-            Wrap(spacing: 8, runSpacing: 8, children: [15, 30, 45, 60, 90, 120].map((minutes) {
-              final active = config.durationMinutes == minutes;
-              return ChoiceChip(
-                label: Text('$minutes мин'),
-                selected: active,
-                onSelected: (_) => setTime(minutes),
-                selectedColor: const Color(0xFFDCF0FC),
-              );
-            }).toList()),
-            const SizedBox(height: 7),
-            const Text('Выбор времени откроет SMS TIME:… для подтверждения.',
-              style: TextStyle(color: Color(0xFF75889B), fontSize: 11)),
-          ]),
-        ),
-        const SizedBox(height: 14),
-        Row(children: [
-          Expanded(child: _QuickAction(icon: Icons.fact_check_outlined, title: 'Состояние',
-              subtitle: 'SMS STATUS', onTap: () => send(GsmProtocol.status))),
-          const SizedBox(width: 10),
-          Expanded(child: _QuickAction(icon: Icons.account_balance_wallet_outlined,
-              title: 'Баланс', subtitle: balanceSubtitle(config), onTap: () => send(GsmProtocol.balance))),
-        ]),
         const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: call,
-          icon: const Icon(Icons.call_outlined),
-          label: const Text('Управление звонком — переключение'),
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(51),
-            foregroundColor: _navy, side: const BorderSide(color: Color(0xFFC4D8EC))),
-        ),
+        _ControlCard(config: config, now: now, send: send, confirmPending: confirmPending),
+        const SizedBox(height: 16),
+        IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: _Tile(label: 'АКБ', value: batteryText(config),
+            sub: config.outAt == null ? 'нажмите, чтобы узнать' : 'SMS ${_replyTime(config.outAt!)}',
+            onTap: () => send(GsmProtocol.status))),
+          const SizedBox(width: 10),
+          Expanded(child: _Tile(label: 'БАЛАНС', value: balanceAmount(config), sub: balanceDate(config),
+            warm: true, onTap: () => send(GsmProtocol.balance))),
+          const SizedBox(width: 10),
+          Expanded(child: _Tile(label: 'РАБОТА', value: '${config.durationMinutes} мин', sub: 'время прогрева')),
+        ])),
         const SizedBox(height: 14),
-        OutlinedButton.icon(onPressed: openMessages, icon: const Icon(Icons.forum_outlined),
-          label: const Text('Открыть переписку с модулем')),
-        OutlinedButton.icon(onPressed: reminder, icon: const Icon(Icons.notifications_active_outlined),
-          label: Text(config.reminderMinutes == null ? 'Напомнить о запуске'
-            : 'Ежедневно в ${(config.reminderMinutes! ~/ 60).toString().padLeft(2,'0')}:${(config.reminderMinutes! % 60).toString().padLeft(2,'0')}')),
-        const SizedBox(height: 14),
-        const _InfoStrip(
-          color: Color(0xFFE7F3FF), icon: Icons.shield_outlined,
-          message: 'Управление работает только с номера, зарегистрированного в модуле. '
-            'Команда из приложения отправляется через обычную SMS.',
-        ),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final minutes in const [15, 30, 45, 60, 90, 120])
+            SkewChip(
+              label: config.durationMinutes == minutes ? '$minutes мин' : '$minutes',
+              selected: config.durationMinutes == minutes,
+              onTap: () => setTime(minutes),
+            ),
+        ]),
+        const SizedBox(height: 6),
+        Text('Выбор времени откроет SMS TIME:… для подтверждения.', style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
+        const SizedBox(height: 12),
+        IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: _SoftButton(
+            icon: Icons.notifications_none_rounded,
+            onTap: reminder,
+            child: config.reminderMinutes == null
+                ? Text('Напомнить о запуске', textAlign: TextAlign.center, style: brandText(14))
+                : Text.rich(TextSpan(text: 'Ежедневно в ', style: brandText(14), children: [
+                    TextSpan(text: _clock(config.reminderMinutes!), style: brandItalic(15, color: Brand.blue)),
+                  ])),
+          )),
+          const SizedBox(width: 10),
+          Expanded(child: _SoftButton(icon: Icons.chat_bubble_outline_rounded, onTap: openMessages,
+            child: Text('Переписка', style: brandText(14)))),
+        ])),
+        const SizedBox(height: 16),
+        Text('Управление работает только с номера, зарегистрированного в модуле. '
+            'Команда отправляется обычной SMS.',
+          textAlign: TextAlign.center, style: brandText(11, color: Brand.muted, weight: FontWeight.w500, height: 1.35)),
       ],
     );
   }
+}
+
+String _clock(int minutes) => '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+class _Header extends StatelessWidget {
+  const _Header({required this.vehicle, required this.chooseCar, required this.call});
+  final String vehicle;
+  final Future<void> Function() chooseCar, call;
+  @override
+  Widget build(BuildContext context) => Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+    Image.asset('assets/larin_cold_logo.png', width: 140, height: 88, fit: BoxFit.contain, gaplessPlayback: true,
+      semanticLabel: 'Larin Cold',
+      errorBuilder: (context, error, stackTrace) => SizedBox(width: 140, height: 88,
+        child: Center(child: Text('LARIN COLD', style: brandItalic(18, color: Brand.blue))))),
+    const SizedBox(width: 8),
+    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      const StartBadge(),
+      const SizedBox(height: 8),
+      Material(
+        color: Colors.white,
+        shape: const StadiumBorder(side: BorderSide(color: Brand.lineSoft, width: 2)),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: chooseCar,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 5, 8, 5),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: Text(vehicle, maxLines: 1, overflow: TextOverflow.ellipsis, style: brandText(14))),
+              const SizedBox(width: 2),
+              const Icon(Icons.expand_more_rounded, size: 20, color: Brand.text),
+            ]),
+          ),
+        ),
+      ),
+    ])),
+    Tooltip(
+      message: 'Позвонить на модуль',
+      child: Material(
+        color: Colors.white,
+        shape: const CircleBorder(side: BorderSide(color: Brand.lineSoft, width: 2)),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: call,
+          child: const SizedBox(width: 46, height: 46, child: Icon(Icons.call_outlined, color: Brand.blue, size: 22)),
+        ),
+      ),
+    ),
+  ]);
+}
+
+class _ControlCard extends StatelessWidget {
+  const _ControlCard({required this.config, required this.now, required this.send, required this.confirmPending});
+  final VehicleConfig config;
+  final DateTime now;
+  final Future<void> Function(String) send;
+  final Future<void> Function() confirmPending;
+
+  @override
+  Widget build(BuildContext context) {
+    final remaining = config.secondsLeft(now);
+    final running = config.endMs != null && remaining > 0;
+    final total = config.endMs == null ? config.durationMinutes : config.cycleMinutes;
+    final confirmed = confirmedOn(config, now);
+    final label = config.endMs == null ? 'НЕТ ОТСЧЁТА' : remaining == 0 ? 'ВРЕМЯ ИСТЕКЛО' : 'ОСТАЛОСЬ';
+    final time = config.endMs == null
+        ? '—:—'
+        : '${(remaining ~/ 60).toString().padLeft(2, '0')}:${(remaining % 60).toString().padLeft(2, '0')}';
+    const outline = [
+      Shadow(color: Colors.white, offset: Offset(-2, -2)), Shadow(color: Colors.white, offset: Offset(2, -2)),
+      Shadow(color: Colors.white, offset: Offset(-2, 2)), Shadow(color: Colors.white, offset: Offset(2, 2)),
+      Shadow(color: Color(0x400B57C4), offset: Offset(0, 6), blurRadius: 12),
+    ];
+    return StickerCard(
+      shadow: true,
+      ring: const Color(0xFFCFE7FB),
+      radius: 26,
+      padding: EdgeInsets.zero,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(23),
+        child: Stack(children: [
+          Positioned(right: -58, bottom: -40, child: Transform.rotate(angle: .21,
+            child: const Opacity(opacity: .10, child: LogoSnowflake(size: 190)))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+            child: Column(children: [
+              SizedBox(width: 240, height: 240, child: CustomPaint(
+                painter: RingPainter(fraction: running ? remaining / (total * 60) : 0,
+                    color: confirmed ? Brand.green : Brand.blue),
+                child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(label, style: brandItalic(13, color: Brand.muted, weight: FontWeight.w800, letterSpacing: 1.5)),
+                  Text(time, style: brandItalic(62, color: Brand.blue, height: 1.05).copyWith(
+                    shadows: outline, fontFeatures: const [FontFeature.tabularFigures()])),
+                  Text(config.endMs == null ? 'выбрано $total мин' : 'из $total мин',
+                    style: brandText(15, color: Brand.muted)),
+                ])),
+              )),
+              const SizedBox(height: 10),
+              _StatusPill(config: config, now: now, refresh: () => send(GsmProtocol.status)),
+              if (config.pendingCommand != null) TextButton(
+                onPressed: confirmPending,
+                child: const Text('Подтвердить отправку SMS вручную'),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Row(children: [
+                  Expanded(child: SkewButton(label: 'ЗАПУСК', color: Brand.green, shadow: Brand.greenShadow,
+                    ring: Brand.greenRing, icon: const PowerGlyph(), onPressed: () => send(GsmProtocol.start))),
+                  const SizedBox(width: 14),
+                  Expanded(child: SkewButton(label: 'СТОП', color: Brand.red, shadow: Brand.redShadow,
+                    ring: Brand.redRing,
+                    icon: Container(width: 15, height: 15, decoration: BoxDecoration(color: Colors.white,
+                      borderRadius: BorderRadius.circular(2.5))),
+                    onPressed: () => send(GsmProtocol.stop))),
+                ]),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.config, required this.now, required this.refresh});
+  final VehicleConfig config;
+  final DateTime now;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = statusTone(config, now);
+    final (bg, fg, ring, dot) = switch (tone) {
+      StatusTone.on => (const Color(0xFFE5F7EA), const Color(0xFF11683A), Brand.greenRing, Brand.green),
+      StatusTone.waiting => (const Color(0xFFE6F0FF), Brand.blue, const Color(0xFFC9DDF7), Brand.blue),
+      StatusTone.warning => (const Color(0xFFFFF4DD), const Color(0xFF8A5A00), const Color(0xFFF3DDA8), const Color(0xFFE0A100)),
+      StatusTone.off || StatusTone.idle => (const Color(0xFFEEF3F9), Brand.muted, const Color(0xFFD6E2EF), const Color(0xFF9AAFC6)),
+    };
+    return Container(
+      constraints: const BoxConstraints(minHeight: 38),
+      padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(19),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [BoxShadow(color: ring, spreadRadius: 1)],
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (tone == StatusTone.waiting)
+          SnowSpinner(size: 16, color: fg)
+        else
+          Container(width: 9, height: 9, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Flexible(child: Text(statusLine(config, now), maxLines: 2, textAlign: TextAlign.center,
+          style: brandText(14, color: fg, height: 1.2))),
+        const SizedBox(width: 6),
+        Tooltip(
+          message: 'Узнать состояние (SMS STATUS)',
+          child: Material(
+            color: Colors.white,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: refresh,
+              child: SizedBox(width: 30, height: 30, child: Icon(Icons.refresh_rounded, size: 19, color: fg)),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  const _Tile({required this.label, required this.value, this.sub, this.onTap, this.warm = false});
+  final String label, value;
+  final String? sub;
+  final VoidCallback? onTap;
+  final bool warm;
+  @override
+  Widget build(BuildContext context) {
+    final labelColor = warm ? Brand.orangeText : Brand.muted;
+    final valueColor = warm ? Brand.orange : Brand.blue;
+    return Container(
+      decoration: BoxDecoration(
+        color: warm ? Brand.orangeBg : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [BoxShadow(color: warm ? Brand.orangeRing : Brand.line, spreadRadius: 2)],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(11, 9, 8, 9),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(label, style: brandItalic(11, color: labelColor, weight: FontWeight.w800, letterSpacing: 1)),
+              FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+                child: Text(value, maxLines: 1, style: brandItalic(22, color: valueColor, height: 1.15))),
+              if (sub != null)
+                Text(sub!, maxLines: 2, style: brandText(10.5, color: labelColor, weight: FontWeight.w500, height: 1.2)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SoftButton extends StatelessWidget {
+  const _SoftButton({required this.icon, required this.child, required this.onTap});
+  final IconData icon;
+  final Widget child;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 50),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.white, width: 2),
+      boxShadow: const [BoxShadow(color: Brand.line, spreadRadius: 2)],
+    ),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(icon, color: Brand.blue, size: 21),
+            const SizedBox(width: 7),
+            Flexible(child: child),
+          ]),
+        ),
+      ),
+    ),
+  );
 }
 
 class _SettingsView extends StatelessWidget {
@@ -733,6 +983,8 @@ class _SettingsView extends StatelessWidget {
     required this.configureUssd,
     required this.smsGranted,
     required this.enableReplies,
+    required this.snowOn,
+    required this.toggleSnow,
   });
   final bool smsGranted;
   final Future<void> Function() enableReplies;
@@ -742,27 +994,33 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function() configure;
   final Future<void> Function(String) manageNumber;
   final Future<void> Function() configureUssd;
+  final bool snowOn;
+  final Future<void> Function(bool) toggleSnow;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 26), children: [
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 26), children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 14),
+        child: Text('Настройки', style: brandItalic(28)),
+      ),
       _SectionCard(title: 'Автомобиль и SIM-карта', icon: Icons.directions_car_outlined,
         child: Column(children: [
           _DetailLine('Автомобиль', config.vehicleName),
           _DetailLine('SIM модуля', config.deviceNumber.isEmpty ? 'Не указан' : config.deviceNumber),
           _DetailLine('Ваш номер', config.ownerNumber.isEmpty ? 'Не указан' : config.ownerNumber),
-          const SizedBox(height: 8),
-          FilledButton.tonalIcon(onPressed: configure, icon: const Icon(Icons.edit_outlined),
-            label: const Text('Изменить настройки')),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: configure,
+            icon: const Icon(Icons.edit_outlined), label: const Text('Изменить настройки'))),
           TextButton(onPressed: chooseCar, child: const Text('Мои автомобили')),
           TextButton(onPressed: deleteCar, child: const Text('Удалить этот автомобиль')),
         ]),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Первый запуск', icon: Icons.person_add_alt_1_outlined,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('На новом модуле мастер регистрируется SMS с собственного номера '
-              'в течение 10 минут после включения.', style: TextStyle(fontSize: 13)),
+          Text('На новом модуле мастер регистрируется SMS с собственного номера '
+              'в течение 10 минут после включения.', style: brandText(13, weight: FontWeight.w500, height: 1.35)),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: GsmProtocol.validPhone(config.ownerNumber)
@@ -773,7 +1031,7 @@ class _SettingsView extends StatelessWidget {
           ),
         ]),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Разрешённые номера', icon: Icons.groups_outlined,
         child: Column(children: [
           _ActionRow(title: 'Список пользователей', description: 'ACCLIMLIST',
@@ -786,9 +1044,11 @@ class _SettingsView extends StatelessWidget {
             icon: Icons.admin_panel_settings_outlined, onTap: () => manageNumber('master')),
         ]),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Баланс SIM-карты', icon: Icons.wallet_outlined,
         child: Column(children: [
+          _DetailLine('Последний баланс', config.balanceAt == null ? 'Не запрашивался'
+              : '${balanceAmount(config)} ${balanceDate(config)}'),
           _DetailLine('Сохранённый в приложении USSD',
             config.ussdCode.isEmpty ? 'Не указан' : config.ussdCode),
           _ActionRow(title: 'Установить USSD-код', description: 'Например, *100#',
@@ -801,43 +1061,57 @@ class _SettingsView extends StatelessWidget {
             icon: Icons.delete_outline, onTap: () => send(GsmProtocol.balanceCodeOff)),
         ]),
       ),
-      const SizedBox(height: 12),
-      _SectionCard(title: 'Уведомления', icon: Icons.notifications_outlined,
-        child: TextButton(onPressed: notificationSettings, child: const Text('Разрешения, звук и точное время'))),
-      const SizedBox(height: 12),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Ответы модуля', icon: Icons.mark_chat_read_outlined,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(smsGranted
-              ? 'Приём включён: состояние обновляется по ответам STATUS с номера модуля.'
+              ? 'Приём включён: состояние обновляется по ответам модуля.'
               : 'Выключено: приложение показывает только расчётный таймер.',
-            style: const TextStyle(fontSize: 13)),
+            style: brandText(13, weight: FontWeight.w500, height: 1.35)),
           if (config.lastReply != null && config.lastReplyAt != null) ...[
             const SizedBox(height: 8),
             Text('Последний ответ, ${_replyTime(config.lastReplyAt!)}:',
-              style: const TextStyle(color: Color(0xFF6A7B90), fontSize: 12)),
-            Text(config.lastReply!, style: const TextStyle(color: _navy, fontSize: 12, fontWeight: FontWeight.w600)),
+              style: brandText(12, color: Brand.muted, weight: FontWeight.w500)),
+            Text(config.lastReply!, style: brandText(12)),
           ],
           if (!smsGranted) ...[
             const SizedBox(height: 10),
-            FilledButton.tonalIcon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
+            FilledButton.icon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
               label: const Text('Включить приём ответов')),
           ],
         ]),
       ),
-      const SizedBox(height: 12),
-      const _SectionCard(title: 'Информация', icon: Icons.info_outline,
+      const SizedBox(height: 14),
+      _SectionCard(title: 'Уведомления и вид', icon: Icons.notifications_outlined,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _ActionRow(title: 'Уведомления', description: 'Разрешения, звук и точное время',
+            icon: Icons.notifications_active_outlined, onTap: notificationSettings),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: snowOn,
+            onChanged: toggleSnow,
+            secondary: const SizedBox(width: 24, height: 24, child: Center(child: LogoSnowflake(size: 22))),
+            title: Text('Зимний снег', style: brandText(14)),
+            subtitle: Text('С 1 декабря по 30 января. Не показывается, если анимация отключена в системе.',
+              style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LARIN COLD GSM · приложение 1.5.3',
-            style: TextStyle(fontWeight: FontWeight.w800, color: _navy)),
-          SizedBox(height: 7),
+          Text('Larin Cold Start · приложение $appVersion', style: brandItalic(15, weight: FontWeight.w800)),
+          const SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '
             'Интернет и сервер не требуются. Расходуется обычный пакет SMS и звонков.',
-            style: TextStyle(fontSize: 12, color: Color(0xFF657B91))),
-          SizedBox(height: 9),
+            style: brandText(12, color: Brand.muted, weight: FontWeight.w500, height: 1.35)),
+          const SizedBox(height: 9),
           Text('Приложение читает только SMS с номеров модулей (если приём ответов включён), '
             'не знает фактическое состояние горения и не гарантирует доставку сообщений. '
             'Запуск отопителя в закрытом помещении запрещён.',
-            style: TextStyle(fontSize: 12, color: Color(0xFF657B91))),
+            style: brandText(12, color: Brand.muted, weight: FontWeight.w500, height: 1.35)),
+          const SizedBox(height: 9),
+          Text('Шрифт Exo 2 — SIL Open Font License.', style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
         ]),
       ),
     ]);
@@ -850,153 +1124,18 @@ String _replyTime(int ms) {
   return '${two(t.day)}.${two(t.month)} ${two(t.hour)}:${two(t.minute)}';
 }
 
-class _BrandHeader extends StatelessWidget {
-  const _BrandHeader({required this.vehicle});
-  final String vehicle;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(17, 10, 17, 15),
-    decoration: BoxDecoration(
-      gradient: const LinearGradient(colors: [Colors.white, Color(0xFFE6F5FF)]),
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: const Color(0xFFD7E9F8)),
-    ),
-    child: Row(children: [
-      Image.asset(
-        'assets/larin_cold_logo.png',
-        width: 124, height: 79, fit: BoxFit.contain,
-        gaplessPlayback: true,
-        errorBuilder: (context, error, stackTrace) => const SizedBox(
-          width: 124, height: 79,
-          child: Center(child: Text('LARIN COLD',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _blue))),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('GSM START', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900,
-          color: _navy, letterSpacing: -.5)),
-        Text(vehicle, maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: _blue, fontWeight: FontWeight.w700)),
-        const Text('Дистанционный запуск', style: TextStyle(color: Color(0xFF7790A9), fontSize: 11)),
-      ])),
-    ]),
-  );
-}
-
-// Drawn with Canvas to avoid depending on a device icon font. These are
-// visual symbols only: the SMS actions remain exactly the same.
-enum _PowerSymbol { start, stop }
-
-class _ActionSymbol extends StatelessWidget {
-  const _ActionSymbol({required this.symbol});
-  final _PowerSymbol symbol;
-
-  @override
-  Widget build(BuildContext context) => CustomPaint(
-    size: const Size(30, 30),
-    painter: _ActionSymbolPainter(symbol),
-  );
-}
-
-class _ActionSymbolPainter extends CustomPainter {
-  const _ActionSymbolPainter(this.symbol);
-  final _PowerSymbol symbol;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.save();
-    canvas.scale(size.width / 30, size.height / 30);
-    if (symbol == _PowerSymbol.start) {
-      final stroke = Paint()
-        ..color = Colors.white
-        ..strokeWidth = 3.2
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
-      // Opening at the top of the universal power icon.
-      canvas.drawArc(
-        Rect.fromCircle(center: const Offset(15, 15.5), radius: 10.5),
-        -0.79, 4.72, false, stroke,
-      );
-      canvas.drawLine(const Offset(15, 2.8), const Offset(15, 14.5), stroke);
-    } else {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          const Rect.fromLTWH(6.5, 6.5, 17, 17),
-          const Radius.circular(2.5),
-        ),
-        Paint()..color = Colors.white,
-      );
-    }
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _ActionSymbolPainter oldDelegate) =>
-      oldDelegate.symbol != symbol;
-}
-
-class _PowerButton extends StatelessWidget {
-  const _PowerButton({required this.label, required this.symbol,
-    required this.color, required this.onPressed});
-  final String label;
-  final _PowerSymbol symbol;
-  final Color color;
-  final VoidCallback onPressed;
-  @override
-  Widget build(BuildContext context) => FilledButton(
-    onPressed: onPressed,
-    style: FilledButton.styleFrom(
-      backgroundColor: color, foregroundColor: Colors.white,
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    ),
-    child: Column(children: [_ActionSymbol(symbol: symbol), const SizedBox(height: 5),
-      Text(label, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13))]),
-  );
-}
-
-class _QuickAction extends StatelessWidget {
-  const _QuickAction({required this.title, required this.subtitle,
-    required this.icon, required this.onTap});
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.white,
-    borderRadius: BorderRadius.circular(18),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Padding(
-        padding: const EdgeInsets.all(15),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(icon, color: _blue, size: 28), const SizedBox(height: 10),
-          Text(title, style: const TextStyle(color: _navy, fontWeight: FontWeight.w800)),
-          Text(subtitle, style: const TextStyle(color: Color(0xFF71849C), fontSize: 11)),
-        ]),
-      ),
-    ),
-  );
-}
-
 class _SectionCard extends StatelessWidget {
   const _SectionCard({required this.title, required this.icon, required this.child});
   final String title;
   final IconData icon;
   final Widget child;
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFE5EDF5))),
+  Widget build(BuildContext context) => StickerCard(
+    radius: 22,
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [Icon(icon, color: _blue, size: 23), const SizedBox(width: 9),
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w900, color: _navy, fontSize: 16))]),
-      const SizedBox(height: 14),
+      Row(children: [Icon(icon, color: Brand.blue, size: 23), const SizedBox(width: 9),
+        Flexible(child: Text(title, style: brandItalic(17, weight: FontWeight.w800)))]),
+      const SizedBox(height: 12),
       child,
     ]),
   );
@@ -1011,12 +1150,13 @@ class _InfoStrip extends StatelessWidget {
   final Widget? action;
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(13),
-    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
+    padding: const EdgeInsets.fromLTRB(13, 8, 8, 8),
+    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.white, width: 2),
+      boxShadow: const [BoxShadow(color: Color(0xFFF3DDA8), spreadRadius: 1)]),
     child: Row(children: [
-      Icon(icon, color: _navy, size: 20), const SizedBox(width: 10),
-      Expanded(child: Text(message,
-        style: const TextStyle(fontSize: 12, color: _navy, height: 1.4))),
+      Icon(icon, color: Brand.text, size: 20), const SizedBox(width: 10),
+      Expanded(child: Text(message, style: brandText(13, height: 1.35))),
       if (action != null) action!,
     ]),
   );
@@ -1030,9 +1170,8 @@ class _DetailLine extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 5),
     child: Row(children: [
-      Expanded(child: Text(label, style: const TextStyle(color: Color(0xFF6A7B90), fontSize: 12))),
-      Flexible(child: Text(value, textAlign: TextAlign.right,
-        style: const TextStyle(color: _navy, fontWeight: FontWeight.w700, fontSize: 12))),
+      Expanded(child: Text(label, style: brandText(12, color: Brand.muted, weight: FontWeight.w500))),
+      Flexible(child: Text(value, textAlign: TextAlign.right, style: brandText(12))),
     ]),
   );
 }
@@ -1047,55 +1186,10 @@ class _ActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(color: Colors.transparent, child: ListTile(
     contentPadding: EdgeInsets.zero,
-    leading: Icon(icon, color: _blue),
-    title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-    subtitle: Text(description, style: const TextStyle(fontSize: 11)),
-    trailing: const Icon(Icons.chevron_right_rounded),
+    leading: Icon(icon, color: Brand.blue),
+    title: Text(title, style: brandText(14)),
+    subtitle: Text(description, style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
+    trailing: const Icon(Icons.chevron_right_rounded, color: Brand.muted),
     onTap: onTap,
   ));
-}
-
-class _CountdownDial extends StatelessWidget {
-  const _CountdownDial({required this.config});
-  final VehicleConfig config;
-  @override
-  Widget build(BuildContext context) {
-    final remaining = config.secondsLeft(DateTime.now());
-    final running = config.endMs != null && remaining > 0;
-    final label = config.endMs == null ? 'НЕТ ОТСЧЁТА' : remaining == 0 ? 'ВРЕМЯ ИСТЕКЛО' : 'ОСТАЛОСЬ';
-    final total = config.endMs == null ? config.durationMinutes : config.cycleMinutes;
-    return SizedBox(width: 220, height: 220, child: CustomPaint(
-      painter: _TicksPainter(total, running ? remaining/(total*60) : 0),
-      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.power_settings_new, color: running && confirmedOn(config, DateTime.now()) ? _green : _blue, size: 36),
-        const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 11, color: _navy, fontWeight: FontWeight.w700)),
-        Text(config.endMs == null ? '—:—' : '${(remaining ~/ 60).toString().padLeft(2,'0')}:${(remaining % 60).toString().padLeft(2,'0')}',
-          style: const TextStyle(fontSize: 32, color: _navy, fontWeight: FontWeight.w800)),
-        Text('из $total мин', style: const TextStyle(fontSize: 12,color: Color(0xFF647993))),
-      ])),
-    ));
-  }
-}
-class _TicksPainter extends CustomPainter {
-  _TicksPainter(this.minutes, this.fraction);
-  final int minutes;
-  final double fraction;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width/2,size.height/2);
-    final radius = math.min(size.width,size.height)/2 - 5;
-    final count = minutes;
-    final elapsed = ((1-fraction)*count).floor();
-    for(var i=0;i<count;i++) {
-      final angle = -math.pi/2 + 2*math.pi*i/count;
-      final paint = Paint()..color = i < elapsed ? const Color(0xFFDCECFB) : _green
-        ..strokeWidth = (count > 60 ? 2.0 : 3.0)
-        ..strokeCap = StrokeCap.round;
-      final direction = Offset(math.cos(angle),math.sin(angle));
-      canvas.drawLine(center+direction*(radius-(i%5==0?13:9)),center+direction*radius,paint);
-    }
-  }
-  @override
-  bool shouldRepaint(_TicksPainter old) => old.minutes != minutes || old.fraction != fraction;
 }

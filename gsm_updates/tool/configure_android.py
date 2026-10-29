@@ -21,7 +21,7 @@ i = ET.SubElement(queries, 'intent')
 ET.SubElement(i, 'action', {ns+'name': 'android.intent.action.SENDTO'})
 ET.SubElement(i, 'data', {ns+'scheme': 'smsto'})
 a = m.find('application')
-a.set(ns+'label', 'LARIN GSM')
+a.set(ns+'label', 'Larin Cold Start')
 a.set(ns+'allowBackup', 'false')
 a.set(ns+'icon', '@mipmap/ic_launcher')
 a.set(ns+'roundIcon', '@mipmap/ic_launcher')
@@ -100,11 +100,73 @@ assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.5.3+153', s, flags=re.M))
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.6.0+160', s, flags=re.M))
 assert any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
 assert not any(e.get(ns+'name') == 'android.permission.READ_SMS' for e in m.findall('uses-permission'))
 assert m.find("./application/receiver[@{0}name='.SmsReceiver']".format(ns)).get(ns+'permission') == 'android.permission.BROADCAST_SMS'
-assert a.get(ns+'label') == 'LARIN GSM'
-print('Android SMS receiver, permission, launcher icon and version configured')
+assert a.get(ns+'label') == 'Larin Cold Start'
+
+# Заставка 1.6.0: значок приложения (питание + снежинка) на светлом фоне логотипа.
+# Android 12+: системная заставка с анимацией — снежинка проворачивается и
+# «раскрывается», дуга питания прорисовывается (до 1 с). До Android 12 — статичная.
+splash_rays = snow_rays
+splash_icon = (
+    '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="288dp" android:height="288dp" '
+    'android:viewportWidth="108" android:viewportHeight="108">'
+    '<group android:pivotX="54" android:pivotY="54" android:scaleX="1" android:scaleY="1">'
+    '<path android:fillColor="#075BAB" android:pathData="M20.25,54 a33.75,33.75 0 1,0 67.5,0 a33.75,33.75 0 1,0 -67.5,0"/>'
+    '<path android:name="power" android:strokeColor="#FFFFFF" android:strokeWidth="6" android:strokeLineCap="round" '
+    'android:fillColor="#00000000" android:trimPathEnd="1" android:pathData="M41,36 A20,20 0,1 0,63 36 M52,30 L52,49"/>'
+    '<path android:fillColor="#075BAB" android:pathData="M53.5,67.5 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0"/>'
+    '<group android:translateX="67.5" android:translateY="67.5" android:scaleX="0.95" android:scaleY="0.95">'
+    '<group android:name="snow">'
+    + splash_rays +
+    '<path android:fillColor="#2FBF4F" android:strokeColor="#E8FFF0" android:strokeWidth="0.6" '
+    'android:pathData="M-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0"/>'
+    '</group></group></group></vector>')
+(res/'drawable/splash_icon.xml').write_text(splash_icon)
+(res/'animator').mkdir(parents=True, exist_ok=True)
+(res/'animator/splash_snow.xml').write_text(
+    '<set xmlns:android="http://schemas.android.com/apk/res/android">'
+    '<objectAnimator android:propertyName="rotation" android:valueFrom="-120" android:valueTo="0" android:valueType="floatType" '
+    'android:duration="900" android:interpolator="@android:interpolator/decelerate_cubic"/>'
+    '<objectAnimator android:propertyName="scaleX" android:valueFrom="0.2" android:valueTo="1" android:valueType="floatType" '
+    'android:duration="700" android:interpolator="@android:anim/overshoot_interpolator"/>'
+    '<objectAnimator android:propertyName="scaleY" android:valueFrom="0.2" android:valueTo="1" android:valueType="floatType" '
+    'android:duration="700" android:interpolator="@android:anim/overshoot_interpolator"/>'
+    '</set>')
+(res/'animator/splash_power.xml').write_text(
+    '<objectAnimator xmlns:android="http://schemas.android.com/apk/res/android" android:propertyName="trimPathEnd" '
+    'android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="600" '
+    'android:interpolator="@android:interpolator/fast_out_slow_in"/>')
+(res/'drawable/splash_animated.xml').write_text(
+    '<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" android:drawable="@drawable/splash_icon">'
+    '<target android:name="snow" android:animation="@animator/splash_snow"/>'
+    '<target android:name="power" android:animation="@animator/splash_power"/>'
+    '</animated-vector>')
+launch_bg = ('<layer-list xmlns:android="http://schemas.android.com/apk/res/android">'
+             '<item><shape><solid android:color="#F3F9FF"/></shape></item>'
+             '<item android:gravity="center" android:width="144dp" android:height="144dp" android:drawable="@drawable/splash_icon"/>'
+             '</layer-list>')
+for folder in ['drawable', 'drawable-v21']:
+    (res/folder).mkdir(parents=True, exist_ok=True)
+    (res/folder/'launch_background.xml').write_text(launch_bg)
+styles_v31 = ('<?xml version="1.0" encoding="utf-8"?><resources>'
+    '<style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">'
+    '<item name="android:forceDarkAllowed">false</item>'
+    '<item name="android:windowFullscreen">false</item>'
+    '<item name="android:windowDrawsSystemBarBackgrounds">false</item>'
+    '<item name="android:windowSplashScreenBackground">#F3F9FF</item>'
+    '<item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_animated</item>'
+    '<item name="android:windowSplashScreenAnimationDuration">900</item>'
+    '<item name="android:windowBackground">@drawable/launch_background</item>'
+    '</style>'
+    '<style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">'
+    '<item name="android:windowBackground">?android:colorBackground</item>'
+    '</style></resources>')
+for folder in ['values-v31', 'values-night-v31']:
+    (res/folder).mkdir(parents=True, exist_ok=True)
+    (res/folder/'styles.xml').write_text(styles_v31)
+print('Android SMS receiver, permission, launcher icon, splash and version configured')
 
 (res/'drawable/notification_icon.xml').write_text('<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M7,5 A9,9 0,1 0,17 5 M12,2 L12,12"/></vector>')

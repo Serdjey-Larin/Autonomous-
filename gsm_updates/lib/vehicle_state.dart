@@ -175,8 +175,6 @@ String _clock(int ms) {
   return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
 
-String _volts(double? v) => v == null ? '' : ' · ${v.toStringAsFixed(1).replaceAll('.', ',')} В';
-
 /// Свежий STATUS: не старше 10 минут и (для «включён») расчётное время не вышло.
 bool statusFresh(VehicleConfig car, DateTime now) {
   if (car.outAt == null || car.outState == null) return false;
@@ -207,38 +205,100 @@ void applyCall(VehicleConfig car, DateTime now) {
   car.ackAt = null;
 }
 
-/// Одна строка под циферблатом. Никогда не пишет «отопитель работает».
+/// Команда по-человечески, в винительном падеже: «запуск», «остановку».
+String commandTitle(String cmd) {
+  if (cmd == 'START') return 'запуск';
+  if (cmd == 'STOP') return 'остановку';
+  if (cmd.startsWith('TIME:')) return 'время ${cmd.substring(5)} мин';
+  if (cmd == 'STATUS') return 'запрос состояния';
+  if (cmd == 'BALANCE') return 'запрос баланса';
+  return cmd;
+}
+
+/// Тон плашки состояния (цвет). Зелёный — только по свежему STATUS.
+enum StatusTone { on, waiting, warning, off, idle }
+
+/// Ждём ответ модуля на отправленную команду (крутится снежинка).
+bool waitingReply(VehicleConfig car, DateTime now) {
+  final nowMs = now.millisecondsSinceEpoch;
+  final limit = replyTimeout.inMilliseconds;
+  if (car.pendingCommand != null && car.pendingSince != null) return nowMs - car.pendingSince! <= limit;
+  if (car.awaitCmd != null && car.awaitSince != null) return nowMs - car.awaitSince! <= limit;
+  return false;
+}
+
+StatusTone statusTone(VehicleConfig car, DateTime now) {
+  final nowMs = now.millisecondsSinceEpoch;
+  if (waitingReply(car, now)) return StatusTone.waiting;
+  if (car.pendingCommand != null || car.awaitCmd != null) return StatusTone.warning;
+  if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) return StatusTone.warning;
+  if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
+    return switch (car.ackCmd) { 'START' => StatusTone.on, 'STOP' => StatusTone.off, _ => StatusTone.idle };
+  }
+  if (car.outState != null && car.outAt != null) {
+    if (!statusFresh(car, now)) return StatusTone.warning;
+    return car.outState == 'on' ? StatusTone.on : StatusTone.off;
+  }
+  return StatusTone.idle;
+}
+
+/// Одна строка под циферблатом. «Прогрев запущен» — только по ответу STATUS.
 String statusLine(VehicleConfig car, DateTime now) {
   final nowMs = now.millisecondsSinceEpoch;
   final pending = car.pendingCommand;
   if (pending != null && car.pendingSince != null) {
     if (nowMs - car.pendingSince! <= replyTimeout.inMilliseconds) {
-      return 'Ждём ответ модуля на $pending';
+      return 'Ждём ответ модуля на ${commandTitle(pending)}';
     }
-    return 'Ответа на $pending нет · подтвердите отправку вручную';
+    return 'Ответа на ${commandTitle(pending)} нет · подтвердите отправку вручную';
   }
   final await_ = car.awaitCmd;
   if (await_ != null && car.awaitSince != null) {
     if (nowMs - car.awaitSince! <= replyTimeout.inMilliseconds) {
-      return '$await_ отправлен · ждём ответ модуля';
+      return 'Отправлено: ${commandTitle(await_)} · ждём ответ модуля';
     }
-    return 'Ответа на $await_ нет · проверьте переписку';
+    return 'Ответа на ${commandTitle(await_)} нет · проверьте переписку';
   }
   if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) {
-    return 'Звонок переключил выход · нажмите «Состояние»';
+    return 'Звонок переключил прогрев · обновите состояние';
   }
   if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
-    return car.ackCmd == '?' ? 'Модуль ответил OK' : 'Модуль принял ${car.ackCmd}';
+    return car.ackCmd == '?' ? 'Модуль ответил OK' : 'Модуль принял ${commandTitle(car.ackCmd!)}';
   }
   if (car.outState != null && car.outAt != null) {
     if (statusFresh(car, now)) {
-      final what = car.outState == 'on' ? 'Выход включён' : 'Выход выключен';
-      return '$what · по SMS в ${_clock(car.outAt!)}${_volts(car.battery)}';
+      final what = car.outState == 'on' ? 'Прогрев запущен' : 'Прогрев выключен';
+      return '$what · SMS в ${_clock(car.outAt!)}';
     }
-    return 'Данные от ${_clock(car.outAt!)} устарели · запросите STATUS';
+    return 'Данные от ${_clock(car.outAt!)} устарели · обновите состояние';
   }
-  return 'Расчётный таймер · не подтверждает работу отопителя';
+  if (car.endMs != null && car.endMs! > nowMs) return 'Расчётный таймер · ответа модуля нет';
+  return 'Готов к запуску';
 }
+
+/// Напряжение АКБ из последнего STATUS: «14,6 В» или «—».
+String batteryText(VehicleConfig car) =>
+    car.battery == null ? '—' : '${car.battery!.toStringAsFixed(1).replaceAll('.', ',')} В';
+
+/// Сумма на плитке «Баланс»: «13 ₽», «−5,20 ₽» или «—».
+String balanceAmount(VehicleConfig car) {
+  final rub = car.balanceRub;
+  if (car.balanceAt == null || rub == null) return '—';
+  final abs = rub.abs();
+  final text = abs == abs.roundToDouble() ? abs.toStringAsFixed(0) : abs.toStringAsFixed(2).replaceAll('.', ',');
+  return '${rub < 0 ? '−' : ''}$text ₽';
+}
+
+/// Дата, на которую баланс актуален: «на 29.10, 11:34».
+String balanceDate(VehicleConfig car) {
+  if (car.balanceAt == null) return 'нажмите, чтобы узнать';
+  final t = DateTime.fromMillisecondsSinceEpoch(car.balanceAt!);
+  String two(int v) => v.toString().padLeft(2, '0');
+  return 'на ${two(t.day)}.${two(t.month)}, ${two(t.hour)}:${two(t.minute)}';
+}
+
+/// Зимний снег: с 1 декабря по 30 января включительно.
+bool isWinterSeason(DateTime d) => d.month == 12 || (d.month == 1 && d.day <= 30);
 
 /// Подпись плитки «Баланс»: «13 ₽ · 29.10 11:34» или исходная подпись.
 String balanceSubtitle(VehicleConfig car) {

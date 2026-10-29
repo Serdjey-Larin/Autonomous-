@@ -85,7 +85,7 @@ void main() {
       applyReply(car, sms(1, '+79281050233', 'OK', t0.add(const Duration(minutes: 1))));
       expect(car.ackCmd, 'START');
       expect(car.outState, isNull, reason: 'OK is not proof of the output state');
-      expect(statusLine(car, t0.add(const Duration(minutes: 2))), contains('Модуль принял START'));
+      expect(statusLine(car, t0.add(const Duration(minutes: 2))), contains('Модуль принял запуск'));
       // Second unexpected OK is ambiguous.
       applyReply(car, sms(2, '+79281050233', 'OK', t0.add(const Duration(minutes: 3))));
       expect(car.ackCmd, '?');
@@ -116,15 +116,15 @@ void main() {
     test('status line never claims the heater runs without STATUS', () {
       final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
       applyUserSent(car, 'START', t0);
-      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'START отправлен · ждём ответ модуля');
-      expect(statusLine(car, t0.add(const Duration(minutes: 20))), contains('Ответа на START нет'));
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Отправлено: запуск · ждём ответ модуля');
+      expect(statusLine(car, t0.add(const Duration(minutes: 20))), contains('Ответа на запуск нет'));
       expect(confirmedOn(car, t0.add(const Duration(minutes: 1))), isFalse);
     });
 
     test('OK auto-confirms the command whose SMS editor was opened', () {
       final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30,
           pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
-      expect(statusLine(car, t0.add(const Duration(seconds: 20))), 'Ждём ответ модуля на START');
+      expect(statusLine(car, t0.add(const Duration(seconds: 20))), 'Ждём ответ модуля на запуск');
       final okAt = t0.add(const Duration(seconds: 40));
       final r = applyReply(car, sms(1, '+79281050233', 'OK', okAt));
       expect(r.timerChanged, isTrue);
@@ -132,7 +132,7 @@ void main() {
       expect(car.ackCmd, 'START');
       expect(car.endMs, okAt.millisecondsSinceEpoch + 30 * 60000, reason: 'countdown starts at the module reply');
       expect(car.outState, isNull);
-      expect(statusLine(car, okAt.add(const Duration(minutes: 1))), contains('Модуль принял START'));
+      expect(statusLine(car, okAt.add(const Duration(minutes: 1))), contains('Модуль принял запуск'));
     });
 
     test('OK for STOP stops the countdown; late OK does not confirm', () {
@@ -164,19 +164,19 @@ void main() {
       applyReply(car, sms(1, '+79281050233', statusOff, t0));
       applyCall(car, t0.add(const Duration(minutes: 1)));
       expect(car.endMs, isNull);
-      expect(statusLine(car, t0.add(const Duration(minutes: 2))), 'Звонок переключил выход · нажмите «Состояние»');
+      expect(statusLine(car, t0.add(const Duration(minutes: 2))), 'Звонок переключил прогрев · обновите состояние');
       applyReply(car, sms(2, '+79281050233', statusOn, t0.add(const Duration(minutes: 3))));
       expect(afterCall(car), isFalse);
       expect(car.endMs, t0.add(const Duration(minutes: 3)).millisecondsSinceEpoch + 14 * 60000);
       expect(confirmedOn(car, t0.add(const Duration(minutes: 4))), isTrue);
-      expect(statusLine(car, t0.add(const Duration(minutes: 4))), startsWith('Выход включён'));
+      expect(statusLine(car, t0.add(const Duration(minutes: 4))), startsWith('Прогрев запущен'));
     });
 
     test('OK texts are short', () {
       final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233',
           pendingCommand: 'STOP', pendingSince: t0.millisecondsSinceEpoch);
       applyReply(car, sms(1, '+79281050233', 'OK', t0.add(const Duration(seconds: 30))));
-      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Модуль принял STOP');
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Модуль принял остановку');
       applyReply(car, sms(2, '+79281050233', 'OK', t0.add(const Duration(minutes: 2))));
       expect(statusLine(car, t0.add(const Duration(minutes: 3))), 'Модуль ответил OK');
     });
@@ -189,6 +189,55 @@ void main() {
       expect(back.battery, 14.6);
       expect(back.endMs, car.endMs);
       expect(back.basis, 'status');
+    });
+  });
+  group('1.6.0 screen texts', () {
+    final t0 = DateTime(2026, 10, 29, 7, 0);
+    test('commands read as words', () {
+      expect(commandTitle('START'), 'запуск');
+      expect(commandTitle('STOP'), 'остановку');
+      expect(commandTitle('TIME:45'), 'время 45 мин');
+    });
+    test('idle and estimate lines', () {
+      final car = VehicleConfig(id: 'a');
+      expect(statusLine(car, t0), 'Готов к запуску');
+      expect(statusTone(car, t0), StatusTone.idle);
+      car.endMs = t0.add(const Duration(minutes: 10)).millisecondsSinceEpoch;
+      expect(statusLine(car, t0), 'Расчётный таймер · ответа модуля нет');
+    });
+    test('waiting spinner only within reply timeout', () {
+      final car = VehicleConfig(id: 'a', pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
+      expect(waitingReply(car, t0.add(const Duration(minutes: 1))), isTrue);
+      expect(statusTone(car, t0.add(const Duration(minutes: 1))), StatusTone.waiting);
+      expect(waitingReply(car, t0.add(const Duration(minutes: 16))), isFalse);
+      expect(statusTone(car, t0.add(const Duration(minutes: 16))), StatusTone.warning);
+    });
+    test('status tones follow STATUS only', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, sms(1, '+79281050233', statusOn, t0));
+      expect(statusTone(car, t0.add(const Duration(minutes: 1))), StatusTone.on);
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Прогрев запущен · SMS в 07:00');
+      expect(batteryText(car), '14,6 В');
+      expect(statusTone(car, t0.add(const Duration(minutes: 30))), StatusTone.warning);
+      applyReply(car, sms(2, '+79281050233', statusOff, t0.add(const Duration(minutes: 31))));
+      expect(statusTone(car, t0.add(const Duration(minutes: 32))), StatusTone.off);
+      expect(statusLine(car, t0.add(const Duration(minutes: 32))), 'Прогрев выключен · SMS в 07:31');
+    });
+    test('balance tile shows amount and date of the SMS', () {
+      final car = VehicleConfig(id: 'a');
+      expect(balanceAmount(car), '—');
+      expect(balanceDate(car), 'нажмите, чтобы узнать');
+      car.balanceRub = 13; car.balanceAt = DateTime(2026, 10, 29, 11, 34).millisecondsSinceEpoch;
+      expect(balanceAmount(car), '13 ₽');
+      expect(balanceDate(car), 'на 29.10, 11:34');
+      car.balanceRub = -5.2;
+      expect(balanceAmount(car), '−5,20 ₽');
+    });
+    test('winter snow season is 1 December – 30 January', () {
+      expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
+      expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);
+      expect(isWinterSeason(DateTime(2027, 1, 30)), isTrue);
+      expect(isWinterSeason(DateTime(2027, 1, 31)), isFalse);
     });
   });
 }
