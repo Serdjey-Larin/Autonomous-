@@ -24,9 +24,9 @@ android {
             val ks = System.getenv("LARIN_KEYSTORE_PATH")
             if (!ks.isNullOrBlank()) {
                 storeFile = file(ks)
-                storePassword = System.getenv("LARIN_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("LARIN_KEY_ALIAS")
-                keyPassword = System.getenv("LARIN_KEY_PASSWORD")
+                storePassword = System.getenv("LARIN_KEYSTORE_PASSWORD")?.trim()
+                keyAlias = System.getenv("LARIN_KEY_ALIAS")?.trim()
+                keyPassword = System.getenv("LARIN_KEY_PASSWORD")?.trim()
             }
         }
     }

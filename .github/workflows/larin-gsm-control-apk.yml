@@ -61,6 +61,13 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/larin"
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/larin/release.p12"
+          PW=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')
+          AL=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')
+          if ! keytool -list -keystore "$RUNNER_TEMP/larin/release.p12" -storetype PKCS12 -storepass "$PW" -alias "$AL" >/dev/null 2>&1; then
+            echo "::error::Ключ не открывается: проверьте секреты LARIN_KEYSTORE_PASSWORD (пароль из LARIN_SIGNING_SECRETS.txt) и LARIN_KEY_ALIAS (larin), а также что LARIN_KEYSTORE_BASE64 вставлен целиком."
+            exit 1
+          fi
+          echo "Ключ подписи открывается, имя ключа найдено."
           echo "LARIN_KEYSTORE_PATH=$RUNNER_TEMP/larin/release.p12" >> "$GITHUB_ENV"
 
       - name: Unpack original LARIN COLD source

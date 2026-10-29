@@ -67,9 +67,9 @@ if 'LARIN_KEYSTORE_PATH' not in g:
             val larinKeystore = System.getenv("LARIN_KEYSTORE_PATH")
             if (!larinKeystore.isNullOrBlank()) {
                 storeFile = file(larinKeystore)
-                storePassword = System.getenv("LARIN_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("LARIN_KEY_ALIAS")
-                keyPassword = System.getenv("LARIN_KEY_PASSWORD")
+                storePassword = System.getenv("LARIN_KEYSTORE_PASSWORD")?.trim()
+                keyAlias = System.getenv("LARIN_KEY_ALIAS")?.trim()
+                keyPassword = System.getenv("LARIN_KEY_PASSWORD")?.trim()
             }
         }
     }
