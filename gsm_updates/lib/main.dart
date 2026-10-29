@@ -15,7 +15,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.0';
+const appVersion = '1.7.1';
 
 /// Выбранное оформление: как в телефоне (по умолчанию), светлое или тёмное.
 final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.system);
