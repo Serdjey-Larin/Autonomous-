@@ -52,7 +52,23 @@ jobs:
           LARIN_KEY_ALIAS: ${{ secrets.LARIN_KEY_ALIAS }}
           LARIN_KEY_PASSWORD: ${{ secrets.LARIN_KEYSTORE_PASSWORD }}
           PROBE_VERSION_CODE: ${{ github.run_number }}
-        run: gradle -p gsm_probe :app:assembleRelease --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set +e
+          gradle -p gsm_probe :app:assembleRelease --no-daemon --console=plain 2>&1 | tee probe-build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # Причина ошибки — в аннотации, чтобы её было видно без полного журнала.
+            python3 - <<'PY'
+          import re
+          log = open("probe-build.log", encoding="utf-8", errors="replace").read()
+          parts = re.findall(r"\* What went wrong:\n(.*?)(?:\n\* Try:|\Z)", log, re.S)
+          errs = [l for l in log.splitlines() if l.startswith(("e: ", "ERROR", "FAILURE"))]
+          text = "\n".join(parts)[:3500] or "\n".join(errs[-40:])[:3500] or log[-3500:]
+          print("::error title=Gradle::" + text.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))
+          PY
+            exit "$rc"
+          fi
 
       - name: Проверка APK
         shell: bash
