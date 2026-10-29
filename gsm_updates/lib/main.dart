@@ -14,7 +14,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.6.0';
+const appVersion = '1.6.1';
 
 class LarinGsmApp extends StatelessWidget {
   const LarinGsmApp({super.key});

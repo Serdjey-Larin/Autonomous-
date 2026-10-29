@@ -56,9 +56,9 @@ foreground = (
     '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" '
     'android:viewportWidth="108" android:viewportHeight="108">'
     '<path android:strokeColor="#FFFFFF" android:strokeWidth="6" android:strokeLineCap="round" '
-    'android:fillColor="#00000000" android:pathData="M41,36 A20,20 0,1 0,63 36 M52,30 L52,49"/>'
-    '<path android:fillColor="#075BAB" android:pathData="M53.5,67.5 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0"/>'
-    '<group android:translateX="67.5" android:translateY="67.5" android:scaleX="0.95" android:scaleY="0.95">'
+    'android:fillColor="#00000000" android:pathData="M43,37.3 A20,20 0,1 0,65 37.3 M54,31.3 L54,50.3"/>'
+    '<path android:fillColor="#075BAB" android:pathData="M55.5,69.5 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0"/>'
+    '<group android:translateX="69.5" android:translateY="69.5" android:scaleX="0.95" android:scaleY="0.95">'
     + snow_rays +
     '<path android:fillColor="#2FBF4F" android:strokeColor="#E8FFF0" android:strokeWidth="0.6" '
     'android:pathData="M-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0"/>'
@@ -100,7 +100,7 @@ assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.6.0+160', s, flags=re.M))
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.6.1+161', s, flags=re.M))
 assert any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
 assert not any(e.get(ns+'name') == 'android.permission.READ_SMS' for e in m.findall('uses-permission'))
 assert m.find("./application/receiver[@{0}name='.SmsReceiver']".format(ns)).get(ns+'permission') == 'android.permission.BROADCAST_SMS'
@@ -116,9 +116,9 @@ splash_icon = (
     '<group android:pivotX="54" android:pivotY="54" android:scaleX="1" android:scaleY="1">'
     '<path android:fillColor="#075BAB" android:pathData="M20.25,54 a33.75,33.75 0 1,0 67.5,0 a33.75,33.75 0 1,0 -67.5,0"/>'
     '<path android:name="power" android:strokeColor="#FFFFFF" android:strokeWidth="6" android:strokeLineCap="round" '
-    'android:fillColor="#00000000" android:trimPathEnd="1" android:pathData="M41,36 A20,20 0,1 0,63 36 M52,30 L52,49"/>'
-    '<path android:fillColor="#075BAB" android:pathData="M53.5,67.5 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0"/>'
-    '<group android:translateX="67.5" android:translateY="67.5" android:scaleX="0.95" android:scaleY="0.95">'
+    'android:fillColor="#00000000" android:trimPathEnd="1" android:pathData="M43,37.3 A20,20 0,1 0,65 37.3 M54,31.3 L54,50.3"/>'
+    '<path android:fillColor="#075BAB" android:pathData="M55.5,69.5 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0"/>'
+    '<group android:translateX="69.5" android:translateY="69.5" android:scaleX="0.95" android:scaleY="0.95">'
     '<group android:name="snow">'
     + splash_rays +
     '<path android:fillColor="#2FBF4F" android:strokeColor="#E8FFF0" android:strokeWidth="0.6" '
