@@ -297,6 +297,13 @@ String balanceAmount(VehicleConfig car) {
   return '${rub < 0 ? '−' : ''}$text ₽';
 }
 
+/// Порог «мало денег»: ниже него плитка баланса подсвечивается оранжевым.
+const lowBalanceRub = 50.0;
+
+/// Баланс известен и меньше 50 ₽.
+bool balanceLow(VehicleConfig car) =>
+    car.balanceAt != null && car.balanceRub != null && car.balanceRub! < lowBalanceRub;
+
 /// Дата, на которую баланс актуален: «на 29.10, 11:34».
 String balanceDate(VehicleConfig car) {
   if (car.balanceAt == null) return 'нажмите, чтобы узнать';

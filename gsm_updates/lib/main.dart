@@ -690,7 +690,7 @@ class _HomeView extends StatelessWidget {
             onTap: () => send(GsmProtocol.status))),
           const SizedBox(width: 10),
           Expanded(child: _Tile(label: 'БАЛАНС', value: balanceAmount(config), sub: balanceDate(config),
-            warm: true, onTap: () => send(GsmProtocol.balance))),
+            warm: balanceLow(config), onTap: () => send(GsmProtocol.balance))),
           const SizedBox(width: 10),
           Expanded(child: _Tile(label: 'РАБОТА', value: '${config.durationMinutes} мин', sub: 'время прогрева')),
         ])),

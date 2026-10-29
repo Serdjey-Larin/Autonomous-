@@ -250,6 +250,16 @@ void main() {
       expect(statusLine(car, t0.add(const Duration(hours: 5, minutes: 1))), 'Данные от 29.10 07:00 устарели · обновите состояние');
       expect(statusTone(car, t0.add(const Duration(hours: 5, minutes: 1))), StatusTone.warning);
     });
+    test('balance tile is highlighted only below 50 ₽', () {
+      final car = VehicleConfig(id: 'a');
+      expect(balanceLow(car), isFalse);
+      car.balanceAt = 1; car.balanceRub = 49.9;
+      expect(balanceLow(car), isTrue);
+      car.balanceRub = 50;
+      expect(balanceLow(car), isFalse);
+      car.balanceRub = -3;
+      expect(balanceLow(car), isTrue);
+    });
     test('winter snow season is 1 December – 30 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
       expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);
