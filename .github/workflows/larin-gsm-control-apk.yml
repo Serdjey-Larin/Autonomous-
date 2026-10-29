@@ -1,5 +1,5 @@
 name: LARIN COLD GSM Control — APK из ZIP
-# Подпись: секреты LARIN_KEYSTORE_BASE64, LARIN_KEYSTORE_PASSWORD, LARIN_KEY_ALIAS; переменная LARIN_CERT_SHA256.
+# Подпись: секреты LARIN_KEYSTORE_BASE64, LARIN_KEYSTORE_PASSWORD, LARIN_KEY_ALIAS; переменная LARIN_CERT_SHA256 (проверяются до сборки).
 
 on:
   push:

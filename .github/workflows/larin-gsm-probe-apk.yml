@@ -1,5 +1,5 @@
 name: LARIN GSM — диагностический APK (проба)
-# Подпись: секреты LARIN_KEYSTORE_BASE64, LARIN_KEYSTORE_PASSWORD, LARIN_KEY_ALIAS; переменная LARIN_CERT_SHA256.
+# Подпись: секреты LARIN_KEYSTORE_BASE64, LARIN_KEYSTORE_PASSWORD, LARIN_KEY_ALIAS; переменная LARIN_CERT_SHA256 (проверяются до сборки).
 
 # Отдельная сборка отдельного приложения ru.larincold.gsmprobe.
 # Основное приложение LARIN GSM и каталог app/ не затрагиваются.
