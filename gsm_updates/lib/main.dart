@@ -827,7 +827,7 @@ class _SettingsView extends StatelessWidget {
       const SizedBox(height: 12),
       const _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LARIN COLD GSM · приложение 1.5.2',
+          Text('LARIN COLD GSM · приложение 1.5.3',
             style: TextStyle(fontWeight: FontWeight.w800, color: _navy)),
           SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '
