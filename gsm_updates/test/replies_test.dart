@@ -38,7 +38,8 @@ void main() {
       expect(b.kind, ReplyKind.balance);
       expect(b.balance, 13);
       expect(parseReply('USSD: Balans -5,50 руб.').balance, -5.5);
-      expect(parseReply('Unknown command').kind, ReplyKind.other);
+      expect(parseReply('Unknown command').kind, ReplyKind.error);
+      expect(parseReply('BALCODE: *100#').kind, ReplyKind.other);
     });
     test('implausible STATUS is rejected', () {
       expect(parseReply('Heater: ON\nLeft: 50 min\nTime: 30 min').kind, ReplyKind.invalid);
