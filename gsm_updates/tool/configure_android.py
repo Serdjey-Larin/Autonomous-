@@ -9,8 +9,11 @@ ET.register_namespace('android', ns[1:-1])
 p = android / 'AndroidManifest.xml'
 tree = ET.parse(p)
 m = tree.getroot()
-if not any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission')):
-    ET.SubElement(m, 'uses-permission', {ns+'name': 'android.permission.RECEIVE_SMS'})
+for e in list(m.findall('uses-permission')):
+    if e.get(ns+'name') in ['android.permission.RECEIVE_SMS','android.permission.READ_SMS']:
+        m.remove(e)
+for permission in ['POST_NOTIFICATIONS','SCHEDULE_EXACT_ALARM','RECEIVE_BOOT_COMPLETED','VIBRATE']:
+    ET.SubElement(m, 'uses-permission', {ns+'name': 'android.permission.'+permission})
 queries = m.find('queries')
 if queries is None: queries = ET.SubElement(m, 'queries')
 i = ET.SubElement(queries, 'intent')
@@ -21,13 +24,19 @@ a.set(ns+'label', 'LARIN GSM')
 a.set(ns+'allowBackup', 'false')
 a.set(ns+'icon', '@mipmap/ic_launcher')
 a.set(ns+'roundIcon', '@mipmap/ic_launcher')
-r = ET.SubElement(a, 'receiver', {ns+'name': '.SmsReceiver', ns+'exported': 'true', ns+'permission': 'android.permission.BROADCAST_SMS'})
+for receiver in list(a.findall('receiver')):
+    if receiver.get(ns+'name') == '.SmsReceiver': a.remove(receiver)
+ET.SubElement(a, 'receiver', {ns+'name': '.AlarmReceiver', ns+'exported':'false'})
+r = ET.SubElement(a, 'receiver', {ns+'name': '.AlarmRestoreReceiver', ns+'exported':'false'})
 f = ET.SubElement(r, 'intent-filter')
-ET.SubElement(f, 'action', {ns+'name': 'android.provider.Telephony.SMS_RECEIVED'})
+for action in ['android.intent.action.BOOT_COMPLETED','android.intent.action.TIME_SET','android.intent.action.TIMEZONE_CHANGED','android.intent.action.MY_PACKAGE_REPLACED','android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED']:
+    ET.SubElement(f,'action',{ns+'name':action})
 tree.write(p, encoding='unicode')
 kotlin = android/'kotlin/ru/larincold/larin_cold_gsm_control'
 kotlin.mkdir(parents=True, exist_ok=True)
-for source in (root/'native').glob('*.kt'): shutil.copy2(source, kotlin/source.name)
+for source in (root/'native').glob('*.kt'):
+    if source.name != 'SmsReceiver.kt': shutil.copy2(source, kotlin/source.name)
+(kotlin/'SmsReceiver.kt').unlink(missing_ok=True)
 # Native vector icon: large power symbol and three GSM bars, inside adaptive safe zone.
 res = android/'res'
 for folder in ['drawable', 'mipmap-anydpi', 'mipmap-anydpi-v26']:
@@ -47,7 +56,9 @@ legacy=foreground.replace('<path ', '<path android:fillColor="#075BAB" android:p
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.4.8+148', s, flags=re.M))
-assert m.find('./application/receiver').get(ns+'permission') == 'android.permission.BROADCAST_SMS'
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.4.9+149', s, flags=re.M))
+assert not any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
 assert a.get(ns+'label') == 'LARIN GSM'
 print('Android SMS receiver, permission, launcher icon and version configured')
+
+(res/'drawable/notification_icon.xml').write_text('<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M7,5 A9,9 0,1 0,17 5 M12,2 L12,12"/></vector>')

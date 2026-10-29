@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'local_alerts.dart';
 import 'package:flutter/material.dart';
 
 import 'device_service.dart';
@@ -49,32 +52,163 @@ class ControlShell extends StatefulWidget {
   State<ControlShell> createState() => _ControlShellState();
 }
 
-class _ControlShellState extends State<ControlShell> {
+class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver {
   final DeviceService _service = DeviceService();
   VehicleConfig _config = VehicleConfig();
+  List<VehicleConfig> _cars = [];
+  final LocalAlerts _alerts = LocalAlerts();
+  Timer? _tick;
+  bool _confirming = false;
+  bool _sending = false;
   bool _loading = true;
   int _page = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() {}); });
     _load();
   }
 
-  Future<void> _load() async {
-    try {
-      final cfg = await _service.load();
-      if (!mounted) return;
-      setState(() { _config = cfg; _loading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+  @override
+  void dispose() { _tick?.cancel(); WidgetsBinding.instance.removeObserver(this); super.dispose(); }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_loading) {
+      _resume();
     }
   }
-
+  Future<void> _resume() async {
+    try {
+      await _alerts.restore();
+      final id = await _alerts.selectedCar();
+      if (!mounted) return;
+      if (id != null && _cars.any((c) => c.id == id)) {
+        setState(() { _config = _cars.firstWhere((c) => c.id == id); _page = 0; });
+        await _persist();
+      }
+      await _confirmPending();
+    } catch (e) { _notice('Не удалось обновить напоминания: $e', error: true); }
+  }
+  Future<void> _load() async {
+    try {
+      final garage = await _service.loadGarage();
+      if (!mounted) return;
+      setState(() {
+        _cars = garage.cars;
+        _config = _cars.firstWhere((c) => c.id == garage.selected, orElse: () => _cars.first);
+        _loading = false;
+      });
+      await _resume();
+    } catch (e) {
+      if (mounted) { setState(() { _cars = [_config]; _loading = false; }); _notice('Ошибка загрузки: $e', error: true); }
+    }
+  }
   Future<void> _persist() async {
-    await _service.save(_config);
+    await _service.saveGarage(_cars, _config.id);
     if (mounted) setState(() {});
   }
+  Future<void> _confirmPending() async {
+    if (_confirming || _sending || !mounted) return;
+    final pending = _cars.where((c) => c.pendingCommand != null).toList();
+    if (pending.isEmpty) return;
+    _confirming = true;
+    try {
+      final car = pending.first;
+      final command = car.pendingCommand!;
+      final isStart = command == GsmProtocol.start;
+      final approved = await showDialog<bool>(context: context, barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: Text('${car.vehicleName}: SMS отправлено?'),
+          content: Text(isStart
+            ? 'Если ты отправил START, начнём расчётный отсчёт на ${car.durationMinutes} мин. Он не подтверждает получение команды модулем.'
+            : command == GsmProtocol.stop
+              ? 'Если STOP отправлено, остановим расчётный таймер. Ответ отопителя смотри в переписке.'
+              : 'Подтверди отправку $command. Ответ об изменении времени смотри в переписке.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Не отправлял')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Да, отправил'))],
+        ));
+      car.pendingCommand = null; car.pendingSince = null;
+      if (approved == true) {
+        if (isStart) {
+          car.cycleMinutes = car.durationMinutes;
+          car.endMs = DateTime.now().add(Duration(minutes: car.cycleMinutes)).millisecondsSinceEpoch;
+          await _persist();
+          await _alerts.cancel('timer_${car.id}');
+          final allowed = await _alerts.permission();
+          await _alerts.timer(car);
+          if (!allowed) _notice('Таймер запущен. Для сигнала разреши уведомления в настройках приложения.');
+          else if (!await _alerts.exact()) _notice('Без доступа «Будильники и напоминания» сигнал может задержаться.');
+        } else if (command == GsmProtocol.stop) {
+          car.endMs = null; await _alerts.cancel('timer_${car.id}');
+        } else if (command.startsWith('TIME:')) {
+          car.durationMinutes = int.parse(command.substring(5));
+        }
+      }
+      await _persist();
+    } finally { _confirming = false; }
+  }
+  Future<void> _chooseCar() async {
+    final id = await showModalBottomSheet<String>(context: context, isScrollControlled: true,
+      builder: (ctx) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const ListTile(title: Text('Мои автомобили')),
+        for (final car in _cars) ListTile(leading: const Icon(Icons.directions_car),
+          title: Text(car.vehicleName), subtitle: Text(car.deviceNumber.isEmpty ? 'Номер не указан' : car.deviceNumber),
+          trailing: car.id == _config.id ? const Icon(Icons.check) : null,
+          onTap: () => Navigator.pop(ctx, car.id)),
+        ListTile(leading: const Icon(Icons.add), title: const Text('Добавить автомобиль'), onTap: () => Navigator.pop(ctx, 'new')),
+      ]))));
+    if (id == null || !mounted) return;
+    if (id == 'new') {
+      final previous = _config;
+      final added = VehicleConfig(id: DateTime.now().microsecondsSinceEpoch.toString(), vehicleName: 'Автомобиль ${_cars.length + 1}');
+      setState(() { _cars.add(added); _config = added; });
+      await _deviceDialog();
+      if (added.deviceNumber.isEmpty) { _cars.remove(added); _config = previous; }
+    } else { _config = _cars.firstWhere((c) => c.id == id); }
+    await _persist();
+  }
+  Future<void> _deleteCar() async {
+    if (_cars.length <= 1) { _notice('Должен остаться хотя бы один автомобиль.'); return; }
+    final car = _config;
+    final yes = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Удалить ${car.vehicleName}?'), content: const Text('Таймер и напоминание будут отменены. Команда STOP модулю не отправляется.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx,false), child: const Text('Отмена')),
+        FilledButton(onPressed: () => Navigator.pop(ctx,true),child: const Text('Удалить'))]));
+    if (yes != true) return;
+    await _alerts.cancel('timer_${car.id}'); await _alerts.cancel('reminder_${car.id}');
+    _cars.remove(car); _config = _cars.first; await _persist();
+  }
+  Future<void> _openMessages() async {
+    if (!await _ensureDevice()) return;
+    try { await _service.openMessages(_config.deviceNumber); } catch(e) { _notice('$e',error:true); }
+  }
+  Future<void> _reminder() async {
+    final car = _config;
+    if (car.reminderMinutes != null) {
+      final action = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+        title: Text('Напоминание: ${car.vehicleName}'), content: Text('Ежедневно в ${_clockText(car.reminderMinutes!)}'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx,'off'),child: const Text('Выключить')),
+          FilledButton(onPressed: () => Navigator.pop(ctx,'edit'),child: const Text('Изменить'))]));
+      if (action == null) return;
+      if (action == 'off') { await _alerts.cancel('reminder_${car.id}'); car.reminderMinutes=null; await _persist(); return; }
+    }
+    if (!mounted) return;
+    final picked = await showTimePicker(context: context, initialTime: TimeOfDay(hour:(car.reminderMinutes??420) ~/60, minute:(car.reminderMinutes??420)%60));
+    if (picked == null) return;
+    if (!await _alerts.permission()) { _notice('Сначала разреши уведомления в настройках приложения.'); return; }
+    car.reminderMinutes = picked.hour*60 + picked.minute;
+    await _alerts.reminder(car); await _persist();
+    _notice(await _alerts.exact() ? 'Ежедневное напоминание установлено. Оно не отправляет START.' : 'Напоминание установлено. Для точного времени включи «Будильники и напоминания».');
+  }
+  Future<void> _notificationSettings() async {
+    final allowed = await _alerts.permission();
+    if (!allowed) { await _alerts.settings(); return; }
+    if (!await _alerts.exact()) { await _alerts.exactSettings(); return; }
+    await _alerts.settings();
+  }
+  String _clockText(int minutes) => '${(minutes ~/ 60).toString().padLeft(2,'0')}:${(minutes % 60).toString().padLeft(2,'0')}';
 
   void _notice(String text, {bool error = false}) {
     if (!mounted) return;
@@ -95,17 +229,21 @@ class _ControlShellState extends State<ControlShell> {
   }
 
   Future<void> _send(String command) async {
+    if (_sending) return;
     if (!await _ensureDevice()) return;
+    final car = _config;
+    _sending = true;
     try {
-      final opened = await _service.composeSms(_config.deviceNumber, command);
-      if (opened) {
-        _notice('Проверь отправку команды $command и ответ модуля в SMS.');
-      } else {
-        _notice('Отправка SMS отменена. Состояние отопителя неизвестно.');
+      if (command == GsmProtocol.start || command == GsmProtocol.stop || command.startsWith('TIME:')) {
+        car.pendingCommand=command; car.pendingSince=DateTime.now().millisecondsSinceEpoch;
+        await _persist();
       }
-    } catch (e) {
-      _notice(e.toString().replaceFirst('Exception: ', ''), error: true);
-    }
+      final opened = await _service.composeSms(car.deviceNumber, command);
+      if (!opened) { car.pendingCommand=null; car.pendingSince=null; await _persist(); }
+    } catch(e) {
+      car.pendingCommand=null; car.pendingSince=null; await _persist();
+      _notice('$e', error:true);
+    } finally { _sending=false; }
   }
 
   Future<void> _makeCall() async {
@@ -127,6 +265,7 @@ class _ControlShellState extends State<ControlShell> {
     if (approved != true) return;
     try {
       await _service.call(_config.deviceNumber);
+      _notice('Звонок переключает выход. Расчётный таймер автоматически не меняется.');
     } catch (e) {
       _notice('$e', error: true);
     }
@@ -188,9 +327,16 @@ class _ControlShellState extends State<ControlShell> {
       ),
     );
     if (saved == true) {
+      final oldNumber = _config.deviceNumber;
       _config.vehicleName = name.text.trim().isEmpty ? 'Мой автомобиль' : name.text.trim();
       _config.deviceNumber = GsmProtocol.normalizePhone(phone.text);
       _config.ownerNumber = GsmProtocol.normalizePhone(owner.text);
+      if (oldNumber != _config.deviceNumber) {
+        _config.endMs = null; _config.pendingCommand = null; _config.pendingSince = null;
+        await _alerts.cancel('timer_${_config.id}');
+      }
+      if (_config.reminderMinutes != null) await _alerts.reminder(_config);
+      if (_config.endMs != null && _config.secondsLeft(DateTime.now()) > 0) await _alerts.timer(_config);
       await _persist();
       _notice('Настройки сохранены только на этом телефоне.');
     }
@@ -277,8 +423,6 @@ class _ControlShellState extends State<ControlShell> {
   }
 
   Future<void> _setTime(int minutes) async {
-    _config.durationMinutes = minutes;
-    await _persist();
     await _send(GsmProtocol.duration(minutes));
   }
 
@@ -299,6 +443,10 @@ class _ControlShellState extends State<ControlShell> {
       body: IndexedStack(index: _page, children: [
         _HomeView(
           config: _config,
+          chooseCar: _chooseCar,
+          openMessages: _openMessages,
+          confirmPending: _confirmPending,
+          reminder: _reminder,
           send: _send,
           call: _makeCall,
           configure: _deviceDialog,
@@ -306,6 +454,9 @@ class _ControlShellState extends State<ControlShell> {
         ),
         _SettingsView(
           config: _config,
+          chooseCar: _chooseCar,
+          deleteCar: _deleteCar,
+          notificationSettings: _notificationSettings,
           send: _send,
           configure: _deviceDialog,
           manageNumber: _manageNumber,
@@ -329,12 +480,17 @@ class _ControlShellState extends State<ControlShell> {
 class _HomeView extends StatelessWidget {
   const _HomeView({
     required this.config,
+    required this.chooseCar,
+    required this.openMessages,
+    required this.confirmPending,
+    required this.reminder,
     required this.send,
     required this.call,
     required this.configure,
     required this.setTime,
   });
   final VehicleConfig config;
+  final Future<void> Function() chooseCar, openMessages, reminder, confirmPending;
   final Future<void> Function(String) send;
   final Future<void> Function() call;
   final Future<void> Function() configure;
@@ -347,6 +503,8 @@ class _HomeView extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
       children: [
         _BrandHeader(vehicle: config.vehicleName),
+        Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: chooseCar,
+          icon: const Icon(Icons.swap_horiz),label: const Text('Выбрать автомобиль'))),
         const SizedBox(height: 14),
         if (!configured) ...[
           _InfoStrip(
@@ -356,6 +514,10 @@ class _HomeView extends StatelessWidget {
             action: TextButton(onPressed: configure, child: const Text('Настроить')),
           ),
           const SizedBox(height: 14),
+        ],
+        if (config.pendingCommand != null) ...[
+          FilledButton.tonal(onPressed: confirmPending, child: const Text('Подтвердить отправку SMS')),
+          const SizedBox(height: 10),
         ],
         Card(
           elevation: 0,
@@ -367,26 +529,9 @@ class _HomeView extends StatelessWidget {
               const Text('АВТОНОМНЫЙ ОТОПИТЕЛЬ',
                 style: TextStyle(color: Color(0xFF7388A0), fontSize: 12, letterSpacing: 1.4, fontWeight: FontWeight.bold)),
               const SizedBox(height: 24),
-              Container(
-                width: 190, height: 190,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFDCECFB), width: 14),
-                  gradient: const LinearGradient(colors: [Color(0xFFEDF8FF), Color(0xFFF9FCFF)],
-                    begin: Alignment.topLeft, end: Alignment.bottomRight),
-                ),
-                child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.air_rounded, color: _blue, size: 60),
-                  SizedBox(height: 9),
-                  Text('СОСТОЯНИЕ', style: TextStyle(fontWeight: FontWeight.w700,
-                    fontSize: 11, color: Color(0xFF6F839A), letterSpacing: 1.2)),
-                  SizedBox(height: 4),
-                  Text('НЕИЗВЕСТНО', style: TextStyle(color: _navy, fontSize: 16,
-                    fontWeight: FontWeight.w900)),
-                ]),
-              ),
+              _CountdownDial(config: config),
               const SizedBox(height: 12),
-              const Text('Статус подтверждается ответным SMS от модуля',
+              const Text('Расчётный таймер · не подтверждает работу отопителя',
                 style: TextStyle(fontSize: 12, color: Color(0xFF647993)), textAlign: TextAlign.center),
               const SizedBox(height: 25),
               Row(children: [
@@ -444,6 +589,12 @@ class _HomeView extends StatelessWidget {
             foregroundColor: _navy, side: const BorderSide(color: Color(0xFFC4D8EC))),
         ),
         const SizedBox(height: 14),
+        OutlinedButton.icon(onPressed: openMessages, icon: const Icon(Icons.forum_outlined),
+          label: const Text('Открыть переписку с модулем')),
+        OutlinedButton.icon(onPressed: reminder, icon: const Icon(Icons.notifications_active_outlined),
+          label: Text(config.reminderMinutes == null ? 'Напомнить о запуске'
+            : 'Ежедневно в ${(config.reminderMinutes! ~/ 60).toString().padLeft(2,'0')}:${(config.reminderMinutes! % 60).toString().padLeft(2,'0')}')),
+        const SizedBox(height: 14),
         const _InfoStrip(
           color: Color(0xFFE7F3FF), icon: Icons.shield_outlined,
           message: 'Управление работает только с номера, зарегистрированного в модуле. '
@@ -457,12 +608,16 @@ class _HomeView extends StatelessWidget {
 class _SettingsView extends StatelessWidget {
   const _SettingsView({
     required this.config,
+    required this.chooseCar,
+    required this.deleteCar,
+    required this.notificationSettings,
     required this.send,
     required this.configure,
     required this.manageNumber,
     required this.configureUssd,
   });
   final VehicleConfig config;
+  final Future<void> Function() chooseCar, deleteCar, notificationSettings;
   final Future<void> Function(String) send;
   final Future<void> Function() configure;
   final Future<void> Function(String) manageNumber;
@@ -479,6 +634,8 @@ class _SettingsView extends StatelessWidget {
           const SizedBox(height: 8),
           FilledButton.tonalIcon(onPressed: configure, icon: const Icon(Icons.edit_outlined),
             label: const Text('Изменить настройки')),
+          TextButton(onPressed: chooseCar, child: const Text('Мои автомобили')),
+          TextButton(onPressed: deleteCar, child: const Text('Удалить этот автомобиль')),
         ]),
       ),
       const SizedBox(height: 12),
@@ -525,9 +682,12 @@ class _SettingsView extends StatelessWidget {
         ]),
       ),
       const SizedBox(height: 12),
+      _SectionCard(title: 'Уведомления', icon: Icons.notifications_outlined,
+        child: TextButton(onPressed: notificationSettings, child: const Text('Разрешения, звук и точное время'))),
+      const SizedBox(height: 12),
       const _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LARIN COLD GSM Control · приложение 0.1.1',
+          Text('LARIN COLD GSM · приложение 1.4.9',
             style: TextStyle(fontWeight: FontWeight.w800, color: _navy)),
           SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '
@@ -747,4 +907,49 @@ class _ActionRow extends StatelessWidget {
     trailing: const Icon(Icons.chevron_right_rounded),
     onTap: onTap,
   );
+}
+
+class _CountdownDial extends StatelessWidget {
+  const _CountdownDial({required this.config});
+  final VehicleConfig config;
+  @override
+  Widget build(BuildContext context) {
+    final remaining = config.secondsLeft(DateTime.now());
+    final running = config.endMs != null && remaining > 0;
+    final label = config.endMs == null ? 'НЕТ ОТСЧЁТА' : remaining == 0 ? 'ВРЕМЯ ИСТЕКЛО' : 'ОСТАЛОСЬ';
+    final total = config.endMs == null ? config.durationMinutes : config.cycleMinutes;
+    return SizedBox(width: 220, height: 220, child: CustomPaint(
+      painter: _TicksPainter(total, running ? remaining/(total*60) : 0),
+      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.power_settings_new, color: running ? _green : _blue, size: 36),
+        const SizedBox(height: 8),
+        Text(label, style: const TextStyle(fontSize: 11, color: _navy, fontWeight: FontWeight.w700)),
+        Text(config.endMs == null ? '—:—' : '${(remaining ~/ 60).toString().padLeft(2,'0')}:${(remaining % 60).toString().padLeft(2,'0')}',
+          style: const TextStyle(fontSize: 32, color: _navy, fontWeight: FontWeight.w800)),
+        Text('из $total мин', style: const TextStyle(fontSize: 12,color: Color(0xFF647993))),
+      ])),
+    ));
+  }
+}
+class _TicksPainter extends CustomPainter {
+  _TicksPainter(this.minutes, this.fraction);
+  final int minutes;
+  final double fraction;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width/2,size.height/2);
+    final radius = math.min(size.width,size.height)/2 - 5;
+    final count = minutes;
+    final elapsed = ((1-fraction)*count).floor();
+    for(var i=0;i<count;i++) {
+      final angle = -math.pi/2 + 2*math.pi*i/count;
+      final paint = Paint()..color = i < elapsed ? const Color(0xFFDCECFB) : _green
+        ..strokeWidth = (count > 60 ? 2.0 : 3.0)
+        ..strokeCap = StrokeCap.round;
+      final direction = Offset(math.cos(angle),math.sin(angle));
+      canvas.drawLine(center+direction*(radius-(i%5==0?13:9)),center+direction*radius,paint);
+    }
+  }
+  @override
+  bool shouldRepaint(_TicksPainter old) => old.minutes != minutes || old.fraction != fraction;
 }
