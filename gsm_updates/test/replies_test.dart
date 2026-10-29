@@ -159,6 +159,28 @@ void main() {
       expect(VehicleConfig.fromJson(car.toJson()).balanceRub, 13);
     });
 
+    test('a call resets the estimate until STATUS shows the real timer', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30);
+      applyReply(car, sms(1, '+79281050233', statusOff, t0));
+      applyCall(car, t0.add(const Duration(minutes: 1)));
+      expect(car.endMs, isNull);
+      expect(statusLine(car, t0.add(const Duration(minutes: 2))), 'Звонок переключил выход · нажмите «Состояние»');
+      applyReply(car, sms(2, '+79281050233', statusOn, t0.add(const Duration(minutes: 3))));
+      expect(afterCall(car), isFalse);
+      expect(car.endMs, t0.add(const Duration(minutes: 3)).millisecondsSinceEpoch + 14 * 60000);
+      expect(confirmedOn(car, t0.add(const Duration(minutes: 4))), isTrue);
+      expect(statusLine(car, t0.add(const Duration(minutes: 4))), startsWith('Выход включён'));
+    });
+
+    test('OK texts are short', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233',
+          pendingCommand: 'STOP', pendingSince: t0.millisecondsSinceEpoch);
+      applyReply(car, sms(1, '+79281050233', 'OK', t0.add(const Duration(seconds: 30))));
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Модуль принял STOP');
+      applyReply(car, sms(2, '+79281050233', 'OK', t0.add(const Duration(minutes: 2))));
+      expect(statusLine(car, t0.add(const Duration(minutes: 3))), 'Модуль ответил OK');
+    });
+
     test('state survives JSON round trip', () {
       final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
       applyReply(car, sms(1, '+79281050233', statusOn, t0));

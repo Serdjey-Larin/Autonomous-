@@ -186,9 +186,26 @@ bool statusFresh(VehicleConfig car, DateTime now) {
   return true;
 }
 
+/// После звонка выход переключён, а STATUS ещё не пришёл.
+bool afterCall(VehicleConfig car) =>
+    car.callAt != null && (car.outAt == null || car.callAt! > car.outAt!);
+
 /// Выход включён по свежему STATUS — только тогда показываем «работу» цветом.
 bool confirmedOn(VehicleConfig car, DateTime now) =>
-    car.outState == 'on' && statusFresh(car, now) && car.basis == 'status';
+    car.outState == 'on' && statusFresh(car, now) && car.basis == 'status' && !afterCall(car);
+
+/// Пользователь позвонил на модуль: звонок переключает выход, поэтому прежний
+/// расчётный отсчёт больше не верен. Точное время даст ответ на STATUS.
+void applyCall(VehicleConfig car, DateTime now) {
+  car.callAt = now.millisecondsSinceEpoch;
+  car.endMs = null;
+  car.startMs = null;
+  car.basis = null;
+  car.awaitCmd = null;
+  car.awaitSince = null;
+  car.ackCmd = null;
+  car.ackAt = null;
+}
 
 /// Одна строка под циферблатом. Никогда не пишет «отопитель работает».
 String statusLine(VehicleConfig car, DateTime now) {
@@ -207,10 +224,11 @@ String statusLine(VehicleConfig car, DateTime now) {
     }
     return 'Ответа на $await_ нет · проверьте переписку';
   }
+  if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) {
+    return 'Звонок переключил выход · нажмите «Состояние»';
+  }
   if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
-    return car.ackCmd == '?'
-        ? 'Модуль ответил OK · запросите STATUS для проверки'
-        : 'Модуль принял ${car.ackCmd} · состояние не проверено';
+    return car.ackCmd == '?' ? 'Модуль ответил OK' : 'Модуль принял ${car.ackCmd}';
   }
   if (car.outState != null && car.outAt != null) {
     if (statusFresh(car, now)) {

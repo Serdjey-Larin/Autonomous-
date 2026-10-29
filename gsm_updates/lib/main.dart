@@ -372,8 +372,14 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     );
     if (approved != true) return;
     try {
-      await _service.call(_config.deviceNumber);
-      _notice('Звонок переключает выход. Расчётный таймер автоматически не меняется.');
+      final car = _config;
+      await _service.call(car.deviceNumber);
+      applyCall(car, DateTime.now());
+      await _alerts.cancel('timer_${car.id}');
+      await _persist();
+      _notice(_smsGranted
+          ? 'После звонка нажмите «Состояние» — таймер покажет точное время.'
+          : 'После звонка отправьте STATUS и посмотрите ответ в переписке.');
     } catch (e) {
       _notice('$e', error: true);
     }
@@ -821,7 +827,7 @@ class _SettingsView extends StatelessWidget {
       const SizedBox(height: 12),
       const _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LARIN COLD GSM · приложение 1.5.1',
+          Text('LARIN COLD GSM · приложение 1.5.2',
             style: TextStyle(fontWeight: FontWeight.w800, color: _navy)),
           SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '

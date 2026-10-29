@@ -42,16 +42,27 @@ kotlin.mkdir(parents=True, exist_ok=True)
 for source in (root/'native').glob('*.kt'):
     shutil.copy2(source, kotlin/source.name)
 assert (kotlin/'SmsReceiver.kt').exists(), 'SmsReceiver.kt not copied'
-# Native vector icon: large power symbol and three GSM bars, inside adaptive safe zone.
+# Native vector icon (1.5.2): power symbol + green snowflake from the LARIN COLD logo,
+# six sharp rays with curved barbs. Everything stays inside the adaptive safe zone (radius 33).
 res = android/'res'
 for folder in ['drawable', 'mipmap-anydpi', 'mipmap-anydpi-v26']:
     (res/folder).mkdir(parents=True, exist_ok=True)
-foreground = '''<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-<path android:strokeColor="#FFFFFF" android:strokeWidth="6" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M42,35 A21,21 0,1 0,66 35 M54,29 L54,48"/>
-<path android:fillColor="#6FE1FF" android:pathData="M72,32 L76,32 L76,38 L72,38 Z M78,28 L82,28 L82,38 L78,38 Z M84,23 L88,23 L88,38 L84,38 Z"/>
-</vector>'''
-# Keep foreground entirely within radius 33: shift small GSM accent inward.
-foreground=foreground.replace('M72,32 L76,32 L76,38 L72,38 Z M78,28 L82,28 L82,38 L78,38 Z M84,23 L88,23 L88,38 L84,38 Z','M66,27 L69,27 L69,31 L66,31 Z M71,24 L74,24 L74,31 L71,31 Z M76,21 L79,21 L79,31 L76,31 Z')
+SNOW_ARM = 'M-1.3,-1.6 L-0.9,-5 C-2.2,-5.6 -3.4,-6.8 -4.3,-8.8 C-2.9,-8 -1.8,-7.4 -0.7,-7.2 L0,-11.5 L0.7,-7.2 C1.8,-7.4 2.9,-8 4.3,-8.8 C3.4,-6.8 2.2,-5.6 0.9,-5 L1.3,-1.6 Z'
+snow_rays = ''.join(
+    '<group android:rotation="%d"><path android:fillColor="#2FBF4F" android:strokeColor="#E8FFF0" '
+    'android:strokeWidth="0.6" android:strokeLineJoin="round" android:pathData="%s"/></group>' % (angle, SNOW_ARM)
+    for angle in range(0, 360, 60))
+foreground = (
+    '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" '
+    'android:viewportWidth="108" android:viewportHeight="108">'
+    '<path android:strokeColor="#FFFFFF" android:strokeWidth="6" android:strokeLineCap="round" '
+    'android:fillColor="#00000000" android:pathData="M41,36 A20,20 0,1 0,63 36 M52,30 L52,49"/>'
+    '<path android:fillColor="#075BAB" android:pathData="M53.5,67.5 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0"/>'
+    '<group android:translateX="67.5" android:translateY="67.5" android:scaleX="0.95" android:scaleY="0.95">'
+    + snow_rays +
+    '<path android:fillColor="#2FBF4F" android:strokeColor="#E8FFF0" android:strokeWidth="0.6" '
+    'android:pathData="M-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0"/>'
+    '</group></vector>')
 (res/'drawable/launcher_foreground.xml').write_text(foreground)
 (res/'drawable/launcher_background.xml').write_text('<shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#075BAB"/></shape>')
 (res/'mipmap-anydpi-v26/ic_launcher.xml').write_text('<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@drawable/launcher_background"/><foreground android:drawable="@drawable/launcher_foreground"/></adaptive-icon>')
@@ -89,7 +100,7 @@ assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.5.1+151', s, flags=re.M))
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.5.2+152', s, flags=re.M))
 assert any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
 assert not any(e.get(ns+'name') == 'android.permission.READ_SMS' for e in m.findall('uses-permission'))
 assert m.find("./application/receiver[@{0}name='.SmsReceiver']".format(ns)).get(ns+'permission') == 'android.permission.BROADCAST_SMS'
