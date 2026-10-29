@@ -1210,7 +1210,7 @@ class _SettingsView extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Larin Cold Start · приложение $appVersion', style: brandItalic(15, color: p.text, weight: FontWeight.w800)),
           const SizedBox(height: 7),
-          Text('Совместимо с LARIN COLD GSM START v1.5.5. '
+          Text('Совместимо с прошивкой LARIN COLD GSM START v1.5.6 (и v1.5.5). '
             'Интернет и сервер не требуются. Расходуется обычный пакет SMS и звонков.', style: small),
           const SizedBox(height: 9),
           Text('Приложение читает только SMS с номеров модулей (если приём ответов включён), '
