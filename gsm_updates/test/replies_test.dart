@@ -12,6 +12,10 @@ InboundSms sms(int seq, String number, String body, DateTime at) => InboundSms(
     seq: seq, number: number, body: body,
     smscMs: at.millisecondsSinceEpoch, receivedMs: at.millisecondsSinceEpoch + 4000);
 
+InboundSms smsAt(int seq, String body, DateTime smsc, DateTime received) => InboundSms(
+    seq: seq, number: '+79281050233', body: body,
+    smscMs: smsc.millisecondsSinceEpoch, receivedMs: received.millisecondsSinceEpoch);
+
 void main() {
   group('parseReply', () {
     test('STATUS OFF from the real module', () {
@@ -290,6 +294,95 @@ void main() {
       expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);
       expect(isWinterSeason(DateTime(2027, 1, 30)), isTrue);
       expect(isWinterSeason(DateTime(2027, 1, 31)), isFalse);
+    });
+  });
+
+  group('1.7.2: старые SMS, отказы, смена номера (отчёт Астры)', () {
+    final t0 = DateTime(2026, 10, 29, 7, 0);
+    Duration s(int v) => Duration(seconds: v);
+    Duration m(int v) => Duration(minutes: v);
+
+    test('OK сформирован за 30 с до нового START — START не подтверждает', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30,
+          pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch, cmdAt: t0.millisecondsSinceEpoch);
+      applyReply(car, smsAt(1, 'OK', t0.subtract(s(30)), t0.add(s(10))));
+      expect(car.pendingCommand, 'START');
+      expect(car.endMs, isNull);
+      expect(car.ackCmd, '?');
+    });
+
+    test('STATUS часовой давности не заменяет более новое «выключен»', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, smsAt(1, statusOff, t0, t0.add(s(5))));
+      applyReply(car, smsAt(2, statusOn, t0.subtract(m(60)), t0.add(m(5))));
+      expect(car.outState, 'off');
+      expect(car.endMs, isNull);
+    });
+
+    test('STATUS, сформированный до STOP, после STOP не включает отсчёт', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, smsAt(1, statusOn, t0, t0.add(s(5))));
+      final stopAt = t0.add(m(5));
+      car.pendingCommand = 'STOP'; car.pendingSince = stopAt.millisecondsSinceEpoch;
+      car.cmdAt = stopAt.millisecondsSinceEpoch;
+      final endBefore = car.endMs;
+      applyReply(car, smsAt(2, statusOn, t0.add(m(4)), t0.add(m(6))));
+      expect(car.pendingCommand, 'STOP', reason: 'старый ответ не снимает ожидание остановки');
+      expect(car.endMs, endBefore);
+      expect(car.outAt, t0.millisecondsSinceEpoch);
+      applyReply(car, smsAt(3, statusOff, t0.add(m(5)).add(s(30)), t0.add(m(6))));
+      expect(car.pendingCommand, isNull);
+      expect(car.outState, 'off');
+    });
+
+    test('SMS-центр «спешит» — берётся время получения', () {
+      final sms = smsAt(1, 'OK', t0.add(m(10)), t0);
+      expect(sms.effectiveMs, t0.millisecondsSinceEpoch);
+      final late = smsAt(2, 'OK', t0.subtract(m(90)), t0);
+      expect(late.effectiveMs, t0.subtract(m(90)).millisecondsSinceEpoch);
+    });
+
+    test('после окончания отсчёта индикатор не зелёный', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30,
+          pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
+      applyReply(car, smsAt(1, 'OK', t0.add(s(30)), t0.add(s(35))));
+      expect(statusTone(car, t0.add(m(5))), StatusTone.on);
+      expect(car.secondsLeft(t0.add(const Duration(hours: 2))), 0);
+      expect(statusTone(car, t0.add(const Duration(hours: 2))), StatusTone.off);
+      expect(statusLine(car, t0.add(const Duration(hours: 2))), 'Прогрев завершён по таймеру');
+    });
+
+    test('DENIED завершает ожидание и показывает причину', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233',
+          pendingCommand: 'TIME:60', pendingSince: t0.millisecondsSinceEpoch);
+      final r = applyReply(car, smsAt(1, 'DENIED', t0.add(s(30)), t0.add(s(35))));
+      expect(r.kind, ReplyKind.error);
+      expect(car.pendingCommand, isNull);
+      expect(statusLine(car, t0.add(m(1))), 'Модуль отклонил: команда доступна только мастер-номеру');
+      expect(statusTone(car, t0.add(m(1))), StatusTone.warning);
+      expect(statusLine(car, t0.add(m(40))), isNot(contains('отклонил')));
+    });
+
+    test('тексты отказов прошивки', () {
+      expect(parseReply('ERROR TIME 15-120').kind, ReplyKind.error);
+      expect(moduleErrorText('UNKNOWN COMMAND'), 'модуль не знает такой команды');
+      expect(moduleErrorText('NO GSM NETWORK'), 'у модуля нет сети');
+      expect(moduleErrorText('USSD TIMEOUT'), 'оператор не ответил на запрос баланса');
+      expect(parseReply('USSD: Vaw balans: 13 rub.').kind, ReplyKind.balance);
+      expect(parseReply('USSD MENU: Balans 137 r.').kind, ReplyKind.balance);
+    });
+
+    test('смена номера модуля стирает данные прежнего модуля', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, smsAt(1, statusOn, t0, t0.add(s(5))));
+      applyReply(car, smsAt(2, balance, t0, t0.add(s(5))));
+      car.forgetModuleData();
+      expect(car.battery, isNull);
+      expect(car.balanceAt, isNull);
+      expect(car.lastReply, isNull);
+      expect(car.outState, isNull);
+      expect(car.endMs, isNull);
+      expect(statusLine(car, t0.add(m(1))), 'Готов к запуску');
     });
   });
 }

@@ -60,6 +60,7 @@ class MainActivity : FlutterActivity() {
                             call.argument<List<Map<*, *>>>("cars") ?: emptyList())
                         result.success(null)
                     }
+                    "forget" -> { SmsInbox.forget(this, call.argument<String>("number") ?: ""); result.success(null) }
                     "drain" -> result.success(SmsInbox.drain(this, (call.argument<Number>("after") ?: 0).toLong()))
                     "ack" -> { SmsInbox.ack(this, (call.argument<Number>("seq") ?: 0).toLong()); result.success(null) }
                     "state" -> result.success(mapOf(

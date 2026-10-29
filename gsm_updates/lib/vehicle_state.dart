@@ -13,6 +13,9 @@ import 'reply_parser.dart';
 /// Ответ ждём не дольше этого — дальше «ответа нет».
 const replyTimeout = Duration(minutes: 15);
 
+/// Допуск на расхождение часов SMS-центра и телефона при сравнении с моментом команды.
+const clockSkew = Duration(seconds: 20);
+
 /// Последний ответ STATUS считается актуальным 5 часов, потом «данные устарели».
 const statusFreshness = Duration(hours: 5);
 
@@ -26,10 +29,21 @@ class InboundSms {
   final int smscMs;
   final int receivedMs;
 
-  /// Время, по которому считаем. Часы SMS-центра бывают сбиты — если
-  /// расхождение больше 10 минут, берём время приёма телефоном.
+  /// Когда модуль отправил SMS (часы SMS-центра). Задержанное SMS сохраняет
+  /// своё настоящее, старое время и не выглядит свежим. Только время «из
+  /// будущего» (центр спешит больше чем на 2 мин) заменяется временем приёма.
   int get effectiveMs =>
-      (receivedMs - smscMs).abs() <= const Duration(minutes: 10).inMilliseconds ? smscMs : receivedMs;
+      smscMs - receivedMs > const Duration(minutes: 2).inMilliseconds ? receivedMs : smscMs;
+
+  /// SMS — ответ на команду, отправленную в момент [since] (часы телефона):
+  /// получено после неё, сформировано не раньше неё (с допуском на часы)
+  /// и не позже 15 минут.
+  bool answers(int? since) {
+    if (since == null) return false;
+    final at = effectiveMs;
+    return receivedMs >= since && at >= since - clockSkew.inMilliseconds &&
+        at - since <= replyTimeout.inMilliseconds;
+  }
 
   factory InboundSms.fromMap(Map<Object?, Object?> m) => InboundSms(
       seq: (m['seq'] as num).toInt(), number: m['number'] as String,
@@ -67,10 +81,19 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
     car.lastReply = sms.body.trim();
     car.lastReplyAt = at;
   }
+  // Ссылка для «ответ ли это на последнюю команду»: момент команды по часам телефона.
+  final cmdRef = car.cmdAt ?? car.pendingSince ?? car.awaitSince;
 
   switch (parsed.kind) {
     case ReplyKind.status:
       final s = parsed.status!;
+      // STATUS, сформированный ДО последней команды (START/STOP/TIME/звонок),
+      // пришёл с задержкой: он устарел для состояния и таймера. Берём только АКБ.
+      final cmdMark = car.cmdAt ?? car.pendingSince;
+      if (cmdMark != null && at < cmdMark - clockSkew.inMilliseconds) {
+        if (car.outAt == null || at > car.outAt!) car.battery = s.battery ?? car.battery;
+        return const ApplyResult(kind: ReplyKind.status, timerChanged: false);
+      }
       final oldEnd = car.endMs, oldCycle = car.cycleMinutes;
       car.outState = s.on ? 'on' : 'off';
       car.outAt = at;
@@ -89,9 +112,8 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
       car.basis = 'status';
       car.outAlready = s.already;
       // STATUS в ответ на отправленную команду: её отправка и приём подтверждены.
-      final pend = car.pendingCommand, pendAt = car.pendingSince;
-      if (pend != null && pendAt != null && at >= pendAt - 60000 &&
-          at - pendAt <= replyTimeout.inMilliseconds &&
+      final pend = car.pendingCommand;
+      if (pend != null && sms.answers(car.pendingSince) &&
           (pend == 'START' || pend == 'STOP' || pend.startsWith('TIME:') || pend == 'STATUS')) {
         car.pendingCommand = null;
         car.pendingSince = null;
@@ -104,12 +126,11 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
       return ApplyResult(kind: ReplyKind.status,
           timerChanged: oldEnd != car.endMs || oldCycle != car.cycleMinutes);
     case ReplyKind.ok:
-      // Команда, для которой открывали редактор SMS и ещё не подтверждали:
-      // OK от этого модуля в пределах 15 минут подтверждает и отправку, и приём.
+      // «OK» подтверждает команду, только если получен после неё и сформирован
+      // не раньше неё: OK на прошлую команду новую не подтверждает.
       // Отсчёт START начинается с момента ответа модуля.
-      final pending = car.pendingCommand, pendingSince = car.pendingSince;
-      if (pending != null && pendingSince != null &&
-          at >= pendingSince - 60000 && at - pendingSince <= replyTimeout.inMilliseconds) {
+      final pending = car.pendingCommand;
+      if (pending != null && sms.answers(car.pendingSince)) {
         car.pendingCommand = null;
         car.pendingSince = null;
         final changed = applyUserSent(car, pending, DateTime.fromMillisecondsSinceEpoch(at));
@@ -119,9 +140,7 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
         car.ackAt = at;
         return ApplyResult(kind: ReplyKind.ok, timerChanged: changed);
       }
-      final since = car.awaitSince;
-      final expected = car.awaitCmd != null && since != null &&
-          at >= since - 60000 && at - since <= replyTimeout.inMilliseconds;
+      final expected = car.awaitCmd != null && sms.answers(cmdRef);
       car.ackCmd = expected ? car.awaitCmd : '?';
       car.ackAt = at;
       if (expected) {
@@ -129,6 +148,21 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
         car.awaitSince = null;
       }
       return const ApplyResult(kind: ReplyKind.ok, timerChanged: false);
+    case ReplyKind.error:
+      // Отказ модуля: ожидание ответа на команду закрывается, причина видна.
+      if (car.errorAt == null || at >= car.errorAt!) {
+        car.errorText = parsed.reason;
+        car.errorAt = at;
+      }
+      if (car.pendingCommand != null && sms.answers(car.pendingSince)) {
+        car.pendingCommand = null;
+        car.pendingSince = null;
+      }
+      if (car.awaitCmd != null && sms.answers(cmdRef)) {
+        car.awaitCmd = null;
+        car.awaitSince = null;
+      }
+      return const ApplyResult(kind: ReplyKind.error, timerChanged: false);
     case ReplyKind.balance:
       if (car.balanceAt == null || at >= car.balanceAt!) {
         car.balanceRub = parsed.balance;
@@ -212,6 +246,7 @@ bool confirmedOn(VehicleConfig car, DateTime now) =>
 /// расчётный отсчёт больше не верен. Точное время даст ответ на STATUS.
 void applyCall(VehicleConfig car, DateTime now) {
   car.callAt = now.millisecondsSinceEpoch;
+  car.cmdAt = car.callAt;
   car.endMs = null;
   car.startMs = null;
   car.basis = null;
@@ -219,6 +254,16 @@ void applyCall(VehicleConfig car, DateTime now) {
   car.awaitSince = null;
   car.ackCmd = null;
   car.ackAt = null;
+}
+
+/// Отказ модуля показываем 30 минут, пока после него не пришёл новый ответ.
+bool _recentError(VehicleConfig car, DateTime now) {
+  final e = car.errorAt;
+  if (e == null || car.errorText == null) return false;
+  if (now.millisecondsSinceEpoch - e > const Duration(minutes: 30).inMilliseconds) return false;
+  if (car.outAt != null && car.outAt! > e) return false;
+  if (car.ackAt != null && car.ackAt! > e) return false;
+  return true;
 }
 
 /// Команда по-человечески, в винительном падеже: «запуск», «остановку».
@@ -247,9 +292,14 @@ StatusTone statusTone(VehicleConfig car, DateTime now) {
   final nowMs = now.millisecondsSinceEpoch;
   if (waitingReply(car, now)) return StatusTone.waiting;
   if (car.pendingCommand != null || car.awaitCmd != null) return StatusTone.warning;
+  if (_recentError(car, now)) return StatusTone.warning;
   if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) return StatusTone.warning;
   if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
-    return switch (car.ackCmd) { 'START' => StatusTone.on, 'STOP' => StatusTone.off, _ => StatusTone.idle };
+    // «Модуль принял запуск» зелёный, только пока не вышло время цикла.
+    if (car.ackCmd == 'START') {
+      return car.endMs != null && car.endMs! > nowMs ? StatusTone.on : StatusTone.off;
+    }
+    return car.ackCmd == 'STOP' ? StatusTone.off : StatusTone.idle;
   }
   if (car.outState != null && car.outAt != null) {
     if (!statusFresh(car, now)) return StatusTone.warning;
@@ -275,10 +325,12 @@ String statusLine(VehicleConfig car, DateTime now) {
     }
     return 'Ответа на ${commandTitle(await_)} нет · проверьте переписку';
   }
+  if (_recentError(car, now)) return 'Модуль отклонил: ${car.errorText}';
   if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) {
     return 'Звонок переключил прогрев · обновите состояние';
   }
   if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
+    if (car.ackCmd == 'START' && (car.endMs == null || car.endMs! <= nowMs)) return 'Прогрев завершён по таймеру';
     return car.ackCmd == '?' ? 'Модуль ответил OK' : 'Модуль принял ${commandTitle(car.ackCmd!)}';
   }
   if (car.outState != null && car.outAt != null) {

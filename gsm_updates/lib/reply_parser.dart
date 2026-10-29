@@ -12,7 +12,7 @@
 /// не меняет.
 library;
 
-enum ReplyKind { status, ok, balance, other, invalid }
+enum ReplyKind { status, ok, balance, error, other, invalid }
 
 class StatusReply {
   const StatusReply({required this.on, required this.leftMinutes,
@@ -50,9 +50,32 @@ final _amount = RegExp(r'(-?\d+(?:[.,]\d{1,2})?)\s*(?:rub|rur|руб|р(?![а-я
 final _afterHint = RegExp(r'(?:balans|баланс|balance)[^\d-]{0,24}(-?\d+(?:[.,]\d{1,2})?)', caseSensitive: false);
 final _battery = RegExp(r'Battery\s*:\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*V', caseSensitive: false);
 
+/// Отказ модуля по-русски или null, если это не отказ.
+/// Тексты — ровно те, что отправляет прошивка v1.5.5/v1.5.6.
+String? moduleErrorText(String body) {
+  final t = body.replaceAll('\r', '').trim().toUpperCase();
+  if (t == 'DENIED') return 'команда доступна только мастер-номеру';
+  if (t.startsWith('ERROR TIME')) return 'время должно быть от 15 до 120 мин';
+  if (t == 'ERROR PHONE') return 'неверный номер телефона';
+  if (t == 'ERROR MAX 3') return 'уже записаны 3 дополнительных номера';
+  if (t == 'ERROR USSD CODE') return 'неверный USSD-код';
+  if (t == 'UNKNOWN COMMAND') return 'модуль не знает такой команды';
+  if (t == 'NO GSM NETWORK') return 'у модуля нет сети';
+  if (t == 'NOT FOUND') return 'номера нет в модуле';
+  if (t == 'ALREADY EXISTS') return 'номер уже записан в модуле';
+  if (t == 'USSD CODE NOT SET') return 'не задан USSD-код баланса';
+  if (t == 'USSD BUSY' || t.startsWith('USSD BUSY/')) return 'модуль занят запросом баланса';
+  if (t.startsWith('USSD ') && !t.startsWith('USSD:') && !t.startsWith('USSD MENU')) {
+    return 'оператор не ответил на запрос баланса';
+  }
+  return null;
+}
+
 ParsedReply parseReply(String body) {
   final text = body.replaceAll('\r', '').trim();
   if (text.toUpperCase() == 'OK') return const ParsedReply(ReplyKind.ok);
+  final error = moduleErrorText(text);
+  if (error != null) return ParsedReply(ReplyKind.error, reason: error);
 
   final heater = _heater.firstMatch(text);
   if (heater == null) {

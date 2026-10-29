@@ -3,10 +3,12 @@ import 'local_alerts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'brand.dart';
 import 'device_service.dart';
 import 'protocol.dart';
+import 'reply_parser.dart';
 import 'sms_inbox.dart';
 import 'vehicle_state.dart';
 
@@ -15,7 +17,11 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.1';
+const appVersion = '1.7.2';
+
+/// Политика конфиденциальности (та же ссылка — в карточке RuStore).
+const privacyPolicyUrl =
+    'https://github.com/Serdjey-Larin/Autonomous-/blob/larin-gsm-sms-receive/rustore/privacy-policy.md';
 
 /// Выбранное оформление: как в телефоне (по умолчанию), светлое или тёмное.
 final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.system);
@@ -174,7 +180,9 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     try {
       await _sms.setDevices([
         for (final c in _cars)
-          if (c.deviceNumber.isNotEmpty) (number: c.deviceNumber, id: c.id, name: c.vehicleName),
+          if (c.deviceNumber.isNotEmpty) (number: c.deviceNumber, id: c.id, name: c.vehicleName,
+            pending: c.pendingCommand, pendingSince: c.pendingSince, cmdAt: c.cmdAt,
+            duration: c.durationMinutes),
       ]);
     } catch (_) {}
   }
@@ -360,6 +368,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
         FilledButton(onPressed: () => Navigator.pop(ctx,true),child: const Text('Удалить'))]));
     if (yes != true) return;
     await _alerts.cancel('timer_${car.id}'); await _alerts.cancel('reminder_${car.id}');
+    try { await _sms.forget(car.deviceNumber); } catch (_) {}
     _cars.remove(car); _config = _cars.first; await _persist();
   }
   Future<void> _openMessages() async {
@@ -416,12 +425,14 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     final car = _config;
     _sending = true;
     try {
+      final prevCmdAt = car.cmdAt;
       if (command == GsmProtocol.start || command == GsmProtocol.stop || command.startsWith('TIME:')) {
-        car.pendingCommand=command; car.pendingSince=DateTime.now().millisecondsSinceEpoch;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        car.pendingCommand=command; car.pendingSince=now; car.cmdAt=now;
         await _persist();
       }
       final opened = await _service.composeSms(car.deviceNumber, command);
-      if (!opened) { car.pendingCommand=null; car.pendingSince=null; await _persist(); }
+      if (!opened) { car.pendingCommand=null; car.pendingSince=null; car.cmdAt=prevCmdAt; await _persist(); }
     } catch(e) {
       car.pendingCommand=null; car.pendingSince=null; await _persist();
       _notice('$e', error:true);
@@ -503,6 +514,14 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
               );
               return;
             }
+            final wanted = canonicalNumber(phone.text);
+            final other = _cars.where((c) => c.id != _config.id && canonicalNumber(c.deviceNumber) == wanted).toList();
+            if (other.isNotEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Этот номер модуля уже записан у автомобиля «${other.first.vehicleName}»')),
+              );
+              return;
+            }
             if (owner.text.trim().isNotEmpty && !GsmProtocol.validPhone(owner.text)) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Ваш номер должен быть в формате +7…')),
@@ -519,9 +538,11 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
       _config.vehicleName = name.text.trim().isEmpty ? 'Мой автомобиль' : name.text.trim();
       _config.deviceNumber = GsmProtocol.normalizePhone(phone.text);
       _config.ownerNumber = GsmProtocol.normalizePhone(owner.text);
-      if (oldNumber != _config.deviceNumber) {
-        _config.endMs = null; _config.pendingCommand = null; _config.pendingSince = null;
+      if (canonicalNumber(oldNumber) != canonicalNumber(_config.deviceNumber)) {
+        // Другой модуль: состояние, АКБ, баланс и ответы прежнего модуля к нему не относятся.
+        _config.forgetModuleData();
         await _alerts.cancel('timer_${_config.id}');
+        if (oldNumber.isNotEmpty) { try { await _sms.forget(oldNumber); } catch (_) {} }
       }
       if (_config.reminderMinutes != null) await _alerts.reminder(_config);
       if (_config.endMs != null && _config.secondsLeft(DateTime.now()) > 0) await _alerts.timer(_config);
@@ -1237,6 +1258,11 @@ class _SettingsView extends StatelessWidget {
             'никуда их не передаёт, не знает фактическое состояние горения и не гарантирует доставку сообщений. '
             'Запуск отопителя в закрытом помещении запрещён.', style: small),
           const SizedBox(height: 9),
+          Align(alignment: Alignment.centerLeft, child: TextButton(
+            onPressed: () => launchUrl(Uri.parse(privacyPolicyUrl), mode: LaunchMode.externalApplication),
+            child: const Text('Политика конфиденциальности'))),
+          Text('Вопросы: larin-cold@yandex.ru', style: brandText(12, color: p.muted, weight: FontWeight.w500)),
+          const SizedBox(height: 6),
           Text('Шрифт Exo 2 — SIL Open Font License.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
         ]),
       ),

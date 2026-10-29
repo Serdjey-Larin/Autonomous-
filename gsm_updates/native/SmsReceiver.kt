@@ -48,20 +48,55 @@ object SmsInbox {
         val info = JSONArray()
         for (car in cars) {
             val n = normalize(car["number"] as? String ?: "")
-            if (n.isNotEmpty()) info.put(JSONObject().put("number", n)
-                .put("id", car["id"] as? String ?: "").put("name", car["name"] as? String ?: ""))
+            if (n.isEmpty()) continue
+            val row = JSONObject().put("number", n)
+                .put("id", car["id"] as? String ?: "").put("name", car["name"] as? String ?: "")
+                .put("duration", (car["duration"] as? Number)?.toInt() ?: 30)
+            (car["pending"] as? String)?.let { row.put("pending", it) }
+            (car["pendingSince"] as? Number)?.let { row.put("pendingSince", it.toLong()) }
+            (car["cmdAt"] as? Number)?.let { row.put("cmdAt", it.toLong()) }
+            info.put(row)
         }
-        prefs(c).edit().putString("devices", set.joinToString("\n")).putString("cars", info.toString()).commit()
+        synchronized(lock) {
+            prefs(c).edit().putString("devices", set.joinToString("\n")).putString("cars", info.toString()).commit()
+        }
     }
 
-    /** id и название автомобиля по номеру модуля (для уведомления). */
-    fun car(c: Context, number: String): Pair<String, String>? {
-        val rows = try { JSONArray(prefs(c).getString("cars", "[]")) } catch (_: Exception) { return null }
-        for (i in 0 until rows.length()) {
-            val r = rows.getJSONObject(i)
-            if (r.optString("number") == number) return r.optString("id") to r.optString("name")
+    /** Данные автомобиля по номеру модуля: id, название, ожидаемая команда. */
+    fun car(c: Context, number: String): JSONObject? {
+        synchronized(lock) {
+            val rows = try { JSONArray(prefs(c).getString("cars", "[]")) } catch (_: Exception) { return null }
+            for (i in 0 until rows.length()) {
+                val r = rows.getJSONObject(i)
+                if (r.optString("number") == number) return r
+            }
+            return null
         }
-        return null
+    }
+
+    /** Ответ на ожидаемую команду получен в фоне — больше ею не считаем. */
+    fun consumePending(c: Context, number: String) {
+        synchronized(lock) {
+            val p = prefs(c)
+            val rows = try { JSONArray(p.getString("cars", "[]")) } catch (_: Exception) { return }
+            for (i in 0 until rows.length()) {
+                val r = rows.getJSONObject(i)
+                if (r.optString("number") == number) { r.remove("pending"); r.remove("pendingSince") }
+            }
+            p.edit().putString("cars", rows.toString()).commit()
+        }
+    }
+
+    /** Машина удалена или номер сменён: убрать из журнала всё с этого номера. */
+    fun forget(c: Context, rawNumber: String) {
+        val number = normalize(rawNumber)
+        synchronized(lock) {
+            val p = prefs(c)
+            val rows = try { JSONArray(p.getString("inbox", "[]")) } catch (_: Exception) { JSONArray() }
+            val keep = JSONArray()
+            for (i in 0 until rows.length()) if (rows.getJSONObject(i).optString("number") != number) keep.put(rows.getJSONObject(i))
+            p.edit().putString("inbox", keep.toString()).commit()
+        }
     }
 
     private fun devices(c: Context): Set<String> =
@@ -124,7 +159,8 @@ class SmsReceiver : BroadcastReceiver() {
         if (!stored) return
         SmsInbox.listener?.invoke()
         if (!SmsInbox.foreground) {
-            try { ReplyNotifier.handle(context, SmsInbox.normalize(sender), body) } catch (_: Exception) { }
+            try { ReplyNotifier.handle(context, SmsInbox.normalize(sender), body,
+                parts.first().timestampMillis, System.currentTimeMillis()) } catch (_: Exception) { }
         }
     }
 }
@@ -152,11 +188,53 @@ object ReplyNotifier {
         return (if (v < 0) "−" else "") + t + " ₽"
     }
 
-    fun handle(c: Context, number: String, body: String) {
-        val (id, rawName) = SmsInbox.car(c, number) ?: ("" to "")
+    /** Те же тексты отказов, что moduleErrorText в reply_parser.dart. */
+    private fun errorText(body: String): String? {
+        val t = body.trim().uppercase()
+        return when {
+            t == "DENIED" -> "Команда доступна только мастер-номеру."
+            t.startsWith("ERROR TIME") -> "Время должно быть от 15 до 120 мин."
+            t == "ERROR PHONE" -> "Неверный номер телефона."
+            t == "ERROR MAX 3" -> "Уже записаны 3 дополнительных номера."
+            t == "ERROR USSD CODE" -> "Неверный USSD-код."
+            t == "UNKNOWN COMMAND" -> "Модуль не знает такой команды."
+            t == "NO GSM NETWORK" -> "У модуля нет сети."
+            t == "NOT FOUND" -> "Номера нет в модуле."
+            t == "ALREADY EXISTS" -> "Номер уже записан в модуле."
+            t == "USSD CODE NOT SET" -> "Не задан USSD-код баланса."
+            t == "USSD BUSY" || t.startsWith("USSD BUSY/") -> "Модуль занят запросом баланса."
+            t.startsWith("USSD ") && !t.startsWith("USSD:") && !t.startsWith("USSD MENU") -> "Оператор не ответил на запрос баланса."
+            else -> null
+        }
+    }
+
+    private const val SKEW = 20_000L
+    private const val REPLY_WINDOW = 15 * 60_000L
+
+    /**
+     * Те же правила времени, что в vehicle_state.dart: время SMS — по часам
+     * SMS-центра (задержанное SMS остаётся старым), кроме времени «из будущего».
+     */
+    fun handle(c: Context, number: String, body: String, smscTs: Long, receivedAt: Long) {
+        val car = SmsInbox.car(c, number)
+        val id = car?.optString("id") ?: ""
+        val rawName = car?.optString("name") ?: ""
         val name = rawName.ifBlank { "Автомобиль" }
         val text = body.trim()
+        val at = if (smscTs - receivedAt > 120_000L) receivedAt else smscTs
+        val pending = car?.optString("pending")?.takeIf { it.isNotEmpty() }
+        val pendingSince = if (car != null && car.has("pendingSince")) car.optLong("pendingSince") else null
+        val cmdMark = if (car != null && car.has("cmdAt")) car.optLong("cmdAt") else pendingSince
+        fun answers(since: Long?) = since != null && receivedAt >= since && at >= since - SKEW && at - since <= REPLY_WINDOW
+        fun timerKey() = "timer_$id"
+        fun scheduleEnd(endMs: Long) {
+            if (id.isEmpty()) return
+            if (endMs > System.currentTimeMillis()) Alerts.schedule(c, JSONObject().put("key", timerKey()).put("car", id)
+                .put("name", rawName).put("at", endMs).put("daily", false).put("minutes", 0))
+            else Alerts.cancel(c, timerKey())
+        }
         val h = heater.find(text)
+        val err = errorText(text)
         var title: String
         var line: String
         if (h != null) {
@@ -165,21 +243,38 @@ object ReplyNotifier {
             val l = left.find(text)?.groupValues?.get(1)?.toIntOrNull()
             val cycle = time.find(text)?.groupValues?.get(1)?.toIntOrNull()
             val volts = if (v != null) "АКБ $v В" else ""
+            // STATUS, сформированный до последней команды, устарел для таймера.
+            val stale = cmdMark != null && at < cmdMark - SKEW
+            if (!stale && pending != null && answers(pendingSince)) SmsInbox.consumePending(c, number)
             if (on && l != null && l > 0 && (cycle == null || l <= cycle)) {
                 title = if (already.containsMatchIn(text)) "$name · прогрев уже идёт" else "$name · прогрев запущен"
                 line = listOf("Осталось $l мин", volts).filter { it.isNotEmpty() }.joinToString(" · ")
-                if (id.isNotEmpty()) Alerts.schedule(c, JSONObject().put("key", "timer_$id").put("car", id)
-                    .put("name", rawName).put("at", System.currentTimeMillis() + l * 60_000L)
-                    .put("daily", false).put("minutes", 0))
+                if (!stale) scheduleEnd(at + l * 60_000L)
             } else {
                 title = if (already.containsMatchIn(text)) "$name · прогрев уже выключен" else "$name · прогрев выключен"
                 line = listOf(if (cycle != null) "Время прогрева $cycle мин" else "", volts)
                     .filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "Модуль ответил на запрос состояния." }
-                if (id.isNotEmpty() && !on) Alerts.cancel(c, "timer_$id")
+                if (!stale && !on && id.isNotEmpty()) Alerts.cancel(c, timerKey())
             }
         } else if (text.equals("OK", true) || text.equals("OK.", true)) {
             title = "$name · команда принята"
             line = "Модуль ответил OK."
+            // Прошивка, отвечающая «OK»: ведём таймер по ожидаемой команде, как экран.
+            if (pending != null && answers(pendingSince)) {
+                SmsInbox.consumePending(c, number)
+                val duration = car?.optInt("duration", 30) ?: 30
+                when {
+                    pending == "START" -> { title = "$name · прогрев запущен"; line = "Модуль принял запуск."
+                        scheduleEnd(at + duration * 60_000L) }
+                    pending == "STOP" -> { title = "$name · прогрев выключен"; line = "Модуль принял остановку."
+                        if (id.isNotEmpty()) Alerts.cancel(c, timerKey()) }
+                    pending.startsWith("TIME:") -> line = "Модуль принял время ${pending.substring(5)} мин."
+                }
+            }
+        } else if (err != null) {
+            title = "$name · команда отклонена"
+            line = err
+            if (pending != null && answers(pendingSince)) SmsInbox.consumePending(c, number)
         } else if (balanceHint.containsMatchIn(text)) {
             val m = amount.find(text) ?: afterHint.find(text)
             val v = m?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()

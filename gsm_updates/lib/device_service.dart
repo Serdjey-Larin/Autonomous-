@@ -36,6 +36,9 @@ class VehicleConfig {
     this.balanceAt,
     this.callAt,
     this.outAlready = false,
+    this.cmdAt,
+    this.errorText,
+    this.errorAt,
   });
 
   String id;
@@ -81,6 +84,25 @@ class VehicleConfig {
 
   /// Последний STATUS был ответом «уже запущен / уже выключен».
   bool outAlready;
+
+  /// Время (часы телефона) последней команды, меняющей состояние: START/STOP/TIME
+  /// или звонок. Ответ, сформированный модулем раньше, состояние не меняет.
+  int? cmdAt;
+
+  /// Последний отказ модуля («DENIED», «ERROR …») по-русски и его время.
+  String? errorText;
+  int? errorAt;
+
+  /// Номер модуля сменился: всё, что пришло от прежнего модуля, забываем.
+  void forgetModuleData() {
+    endMs = null; startMs = null; basis = null;
+    pendingCommand = null; pendingSince = null;
+    outState = null; outAt = null; battery = null; leftMin = null; timeMin = null;
+    lastReply = null; lastReplyAt = null;
+    awaitCmd = null; awaitSince = null; ackCmd = null; ackAt = null;
+    balanceRub = null; balanceText = null; balanceAt = null;
+    callAt = null; outAlready = false; cmdAt = null; errorText = null; errorAt = null;
+  }
   int secondsLeft(DateTime now) => endMs == null ? 0 : ((endMs! - now.millisecondsSinceEpoch) / 1000).ceil().clamp(0, cycleMinutes * 60);
   Map<String, dynamic> toJson() => {'id': id, 'deviceNumber': deviceNumber, 'ownerNumber': ownerNumber,
     'vehicleName': vehicleName, 'durationMinutes': durationMinutes, 'ussdCode': ussdCode,
@@ -91,7 +113,7 @@ class VehicleConfig {
     'lastReply': lastReply, 'lastReplyAt': lastReplyAt, 'awaitCmd': awaitCmd,
     'awaitSince': awaitSince, 'ackCmd': ackCmd, 'ackAt': ackAt,
     'balanceRub': balanceRub, 'balanceText': balanceText, 'balanceAt': balanceAt, 'callAt': callAt,
-    'outAlready': outAlready};
+    'outAlready': outAlready, 'cmdAt': cmdAt, 'errorText': errorText, 'errorAt': errorAt};
   factory VehicleConfig.fromJson(Map<String, dynamic> j) => VehicleConfig(
     id: j['id'] as String, deviceNumber: j['deviceNumber'] as String? ?? '',
     ownerNumber: j['ownerNumber'] as String? ?? '', vehicleName: j['vehicleName'] as String? ?? 'Автомобиль',
@@ -107,7 +129,8 @@ class VehicleConfig {
     awaitSince: j['awaitSince'] as int?, ackCmd: j['ackCmd'] as String?,
     ackAt: j['ackAt'] as int?, balanceRub: (j['balanceRub'] as num?)?.toDouble(),
     balanceText: j['balanceText'] as String?, balanceAt: j['balanceAt'] as int?, callAt: j['callAt'] as int?,
-    outAlready: j['outAlready'] == true);
+    outAlready: j['outAlready'] == true, cmdAt: j['cmdAt'] as int?,
+    errorText: j['errorText'] as String?, errorAt: j['errorAt'] as int?);
   String deviceNumber;
   String ownerNumber;
   String vehicleName;
