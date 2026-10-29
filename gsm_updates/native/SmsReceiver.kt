@@ -173,7 +173,8 @@ object ReplyNotifier {
                     .put("daily", false).put("minutes", 0))
             } else {
                 title = if (already.containsMatchIn(text)) "$name · прогрев уже выключен" else "$name · прогрев выключен"
-                line = volts.ifEmpty { "Модуль ответил на запрос состояния." }
+                line = listOf(if (cycle != null) "Время прогрева $cycle мин" else "", volts)
+                    .filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "Модуль ответил на запрос состояния." }
                 if (id.isNotEmpty() && !on) Alerts.cancel(c, "timer_$id")
             }
         } else if (text.equals("OK", true) || text.equals("OK.", true)) {
