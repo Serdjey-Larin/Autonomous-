@@ -103,6 +103,8 @@ if 'abiFilters' not in g:
     anchor = '    defaultConfig {'
     assert g.count(anchor) == 1, 'Flutter template changed: defaultConfig not found'
     g = g.replace(anchor, anchor + '\n        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }', 1)
+    # Библиотеки плагинов для x86 иногда попадают в APK мимо abiFilters — исключаем явно.
+    g = g.replace('android {', 'android {\n    packaging { jniLibs { excludes += listOf("lib/x86/**", "lib/x86_64/**") } }', 1)
     gradle_file.write_text(g)
 assert 'abiFilters' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
