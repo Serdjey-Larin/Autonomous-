@@ -53,6 +53,34 @@ foreground=foreground.replace('M72,32 L76,32 L76,38 L72,38 Z M78,28 L82,28 L82,3
 # Legacy vector has a filled tile; Android 8+ uses the adaptive resources above.
 legacy=foreground.replace('<path ', '<path android:fillColor="#075BAB" android:pathData="M0,0 L108,0 L108,108 L0,108 Z"/><path ',1)
 (res/'mipmap-anydpi/ic_launcher.xml').write_text(legacy)
+# Release signing with a permanent LARIN COLD key (never the runner's random debug key).
+# The keystore path and passwords come from environment variables set by CI from
+# GitHub Secrets. Without them a local release build falls back to the debug key,
+# but CI refuses to build (see the workflow) and verifies the certificate afterwards.
+gradle_file = root/'android/app/build.gradle.kts'
+g = gradle_file.read_text()
+if 'LARIN_KEYSTORE_PATH' not in g:
+    debug_line = 'signingConfig = signingConfigs.getByName("debug")'
+    assert g.count(debug_line) == 1, 'Flutter template changed: release signing line not found'
+    signing_block = '''    signingConfigs {
+        create("release") {
+            val larinKeystore = System.getenv("LARIN_KEYSTORE_PATH")
+            if (!larinKeystore.isNullOrBlank()) {
+                storeFile = file(larinKeystore)
+                storePassword = System.getenv("LARIN_KEYSTORE_PASSWORD")?.trim()
+                keyAlias = System.getenv("LARIN_KEY_ALIAS")?.trim()
+                keyPassword = System.getenv("LARIN_KEY_PASSWORD")?.trim()
+            }
+        }
+    }
+
+    buildTypes {'''
+    assert g.count('    buildTypes {') == 1, 'Flutter template changed: buildTypes block not found'
+    g = g.replace('    buildTypes {', signing_block, 1)
+    g = g.replace(debug_line, 'signingConfig = if (System.getenv("LARIN_KEYSTORE_PATH").isNullOrBlank()) '
+                  'signingConfigs.getByName("debug") else signingConfigs.getByName("release")', 1)
+    gradle_file.write_text(g)
+assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
