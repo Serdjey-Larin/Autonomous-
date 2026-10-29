@@ -4,7 +4,7 @@ import 'package:larin_cold_gsm_control/main.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:flutter/services.dart';
-class MemoryPreferences extends SharedPreferencesAsyncPlatform {
+final class MemoryPreferences extends SharedPreferencesAsyncPlatform {
   final values = <String, Object>{};
   @override
   dynamic noSuchMethod(Invocation call) {
