@@ -1,8 +1,14 @@
 package ru.larincold.larin_cold_gsm_control
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Telephony
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,6 +27,9 @@ object SmsInbox {
     /** Вызывается из MainActivity, пока Flutter запущен. */
     @Volatile var listener: (() -> Unit)? = null
 
+    /** Приложение на экране — уведомление об ответе не нужно, экран обновится сам. */
+    @Volatile var foreground: Boolean = false
+
     fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
@@ -34,9 +43,25 @@ object SmsInbox {
         return if (d.length < 10) "" else "+$d"
     }
 
-    fun setDevices(c: Context, numbers: List<String>) {
+    fun setDevices(c: Context, numbers: List<String>, cars: List<Map<*, *>> = emptyList()) {
         val set = numbers.map { normalize(it) }.filter { it.isNotEmpty() }.toSortedSet()
-        prefs(c).edit().putString("devices", set.joinToString("\n")).commit()
+        val info = JSONArray()
+        for (car in cars) {
+            val n = normalize(car["number"] as? String ?: "")
+            if (n.isNotEmpty()) info.put(JSONObject().put("number", n)
+                .put("id", car["id"] as? String ?: "").put("name", car["name"] as? String ?: ""))
+        }
+        prefs(c).edit().putString("devices", set.joinToString("\n")).putString("cars", info.toString()).commit()
+    }
+
+    /** id и название автомобиля по номеру модуля (для уведомления). */
+    fun car(c: Context, number: String): Pair<String, String>? {
+        val rows = try { JSONArray(prefs(c).getString("cars", "[]")) } catch (_: Exception) { return null }
+        for (i in 0 until rows.length()) {
+            val r = rows.getJSONObject(i)
+            if (r.optString("number") == number) return r.optString("id") to r.optString("name")
+        }
+        return null
     }
 
     private fun devices(c: Context): Set<String> =
@@ -96,6 +121,95 @@ class SmsReceiver : BroadcastReceiver() {
         val body = parts.joinToString("") { it.messageBody ?: "" }
         if (body.isBlank()) return
         val stored = SmsInbox.store(context, sender, body, parts.first().timestampMillis, System.currentTimeMillis())
-        if (stored) SmsInbox.listener?.invoke()
+        if (!stored) return
+        SmsInbox.listener?.invoke()
+        if (!SmsInbox.foreground) {
+            try { ReplyNotifier.handle(context, SmsInbox.normalize(sender), body) } catch (_: Exception) { }
+        }
+    }
+}
+
+/**
+ * Уведомление об ответе модуля, когда приложение закрыто или свёрнуто, и
+ * перепланирование сигнала «готов к поездке» по ответу STATUS.
+ * Те же правила разбора, что в reply_parser.dart; состояние в Dart обновится
+ * из журнала при следующем открытии приложения.
+ */
+object ReplyNotifier {
+    private const val CHANNEL = "larin_replies"
+    private val heater = Regex("""heater\s*:\s*(on|off)""", RegexOption.IGNORE_CASE)
+    private val left = Regex("""left\s*:\s*(\d{1,3})\s*min""", RegexOption.IGNORE_CASE)
+    private val time = Regex("""time\s*:\s*(\d{1,3})\s*min""", RegexOption.IGNORE_CASE)
+    private val battery = Regex("""battery\s*:\s*(\d{1,2}[.,]\d)\s*v""", RegexOption.IGNORE_CASE)
+    private val balanceHint = Regex("""^USSD\s*:|balans|баланс|balance""", RegexOption.IGNORE_CASE)
+    private val amount = Regex("""(-?\d+(?:[.,]\d{1,2})?)\s*(?:rub|rur|руб|р(?![а-яё])|₽)""", RegexOption.IGNORE_CASE)
+    private val afterHint = Regex("""(?:balans|баланс|balance)[^\d-]{0,24}(-?\d+(?:[.,]\d{1,2})?)""", RegexOption.IGNORE_CASE)
+
+    private fun rub(v: Double): String {
+        val a = kotlin.math.abs(v)
+        val t = if (a == Math.rint(a)) a.toLong().toString() else String.format(java.util.Locale.ROOT, "%.2f", a).replace('.', ',')
+        return (if (v < 0) "−" else "") + t + " ₽"
+    }
+
+    fun handle(c: Context, number: String, body: String) {
+        val (id, rawName) = SmsInbox.car(c, number) ?: ("" to "")
+        val name = rawName.ifBlank { "Автомобиль" }
+        val text = body.trim()
+        val h = heater.find(text)
+        var title: String
+        var line: String
+        if (h != null) {
+            val on = h.groupValues[1].equals("on", true)
+            val v = battery.find(text)?.groupValues?.get(1)?.replace('.', ',')
+            val l = left.find(text)?.groupValues?.get(1)?.toIntOrNull()
+            val cycle = time.find(text)?.groupValues?.get(1)?.toIntOrNull()
+            val volts = if (v != null) "АКБ $v В" else ""
+            if (on && l != null && l > 0 && (cycle == null || l <= cycle)) {
+                title = "$name · прогрев запущен"
+                line = listOf("Осталось $l мин", volts).filter { it.isNotEmpty() }.joinToString(" · ")
+                if (id.isNotEmpty()) Alerts.schedule(c, JSONObject().put("key", "timer_$id").put("car", id)
+                    .put("name", rawName).put("at", System.currentTimeMillis() + l * 60_000L)
+                    .put("daily", false).put("minutes", 0))
+            } else {
+                title = "$name · прогрев выключен"
+                line = volts.ifEmpty { "Модуль ответил на запрос состояния." }
+                if (id.isNotEmpty() && !on) Alerts.cancel(c, "timer_$id")
+            }
+        } else if (text.equals("OK", true) || text.equals("OK.", true)) {
+            title = "$name · команда принята"
+            line = "Модуль ответил OK."
+        } else if (balanceHint.containsMatchIn(text)) {
+            val m = amount.find(text) ?: afterHint.find(text)
+            val v = m?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            if (v != null && v < 50) {
+                title = "$name · мало денег на SIM"
+                line = "Баланс ${rub(v)}. Пополните SIM-карту модуля."
+            } else if (v != null) {
+                title = "$name · баланс ${rub(v)}"
+                line = "Ответ модуля на запрос баланса."
+            } else {
+                title = "$name · баланс SIM"
+                line = text.take(160)
+            }
+        } else {
+            title = "$name · ответ модуля"
+            line = text.take(160)
+        }
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Ответы модуля", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Состояние прогрева, баланс и другие ответы модуля, когда приложение закрыто"
+            })
+        }
+        if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) return
+        val target = Intent(c, MainActivity::class.java).setData(Uri.parse("larin://reply/$id"))
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (id.isNotEmpty()) target.putExtra("car", id)
+        val tap = PendingIntent.getActivity(c, 1, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(c, CHANNEL) else Notification.Builder(c)
+        val n = builder.setSmallIcon(R.drawable.notification_icon).setContentTitle(title).setContentText(line)
+            .setStyle(Notification.BigTextStyle().bigText(line)).setAutoCancel(true).setContentIntent(tap)
+            .setCategory(Notification.CATEGORY_STATUS).build()
+        try { nm.notify("reply_$id", 2, n) } catch (_: SecurityException) { }
     }
 }

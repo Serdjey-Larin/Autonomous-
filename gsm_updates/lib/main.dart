@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'local_alerts.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'brand.dart';
@@ -14,52 +15,90 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.6.1';
+const appVersion = '1.7.0';
+
+/// Выбранное оформление: как в телефоне (по умолчанию), светлое или тёмное.
+final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.system);
+
+ThemeMode themeFromName(String? name) => switch (name) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+
+ThemeData buildTheme(Palette p) {
+  final scheme = ColorScheme.fromSeed(
+    seedColor: Brand.blue,
+    brightness: p.dark ? Brightness.dark : Brightness.light,
+    primary: p.dark ? const Color(0xFF8FD0FF) : Brand.blue,
+    surface: p.card,
+  );
+  final base = p.dark ? ThemeData.dark() : ThemeData.light();
+  return ThemeData(
+    useMaterial3: true,
+    brightness: p.dark ? Brightness.dark : Brightness.light,
+    fontFamily: brandFont,
+    scaffoldBackgroundColor: p.canvas,
+    colorScheme: scheme,
+    extensions: [p],
+    textTheme: base.textTheme.apply(fontFamily: brandFont, bodyColor: p.text, displayColor: p.text),
+    iconTheme: IconThemeData(color: p.accent),
+    dialogTheme: DialogThemeData(
+      backgroundColor: p.card,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      titleTextStyle: brandItalic(20, weight: FontWeight.w800, color: p.text),
+      contentTextStyle: brandText(15, weight: FontWeight.w500, color: p.text, height: 1.35),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(backgroundColor: p.card, surfaceTintColor: Colors.transparent),
+    listTileTheme: ListTileThemeData(textColor: p.text, iconColor: p.accent),
+    filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
+      backgroundColor: p.dark ? const Color(0xFF1F7BE0) : Brand.blue,
+      foregroundColor: Colors.white,
+      textStyle: brandItalic(15, weight: FontWeight.w800),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    )),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(
+      foregroundColor: p.accent,
+      side: BorderSide(color: p.line, width: 2),
+      textStyle: brandText(14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    )),
+    textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(
+      foregroundColor: p.accent, textStyle: brandText(14, weight: FontWeight.w700),
+    )),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
+      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Brand.green : null),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      contentTextStyle: brandText(14, color: Colors.white, weight: FontWeight.w500),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: p.dark ? const Color(0xFF081F42) : Colors.white,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+  );
+}
 
 class LarinGsmApp extends StatelessWidget {
   const LarinGsmApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ColorScheme.fromSeed(seedColor: Brand.blue, primary: Brand.blue, surface: Colors.white);
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Larin Cold Start',
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: brandFont,
-        scaffoldBackgroundColor: Brand.canvas,
-        colorScheme: scheme,
-        textTheme: ThemeData.light().textTheme.apply(fontFamily: brandFont, bodyColor: Brand.text, displayColor: Brand.text),
-        dialogTheme: DialogThemeData(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          titleTextStyle: brandItalic(20, weight: FontWeight.w800),
-        ),
-        filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
-          textStyle: brandItalic(15, weight: FontWeight.w800),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        )),
-        textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(
-          foregroundColor: Brand.blue, textStyle: brandText(14, weight: FontWeight.w700),
-        )),
-        switchTheme: SwitchThemeData(
-          thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
-          trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Brand.green : null),
-        ),
-        snackBarTheme: SnackBarThemeData(
-          behavior: SnackBarBehavior.floating,
-          contentTextStyle: brandText(14, color: Colors.white, weight: FontWeight.w500),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-        ),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeMode,
+      builder: (context, mode, _) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Larin Cold Start',
+        themeMode: mode,
+        theme: buildTheme(Palette.light),
+        darkTheme: buildTheme(Palette.darkPalette),
+        home: const ControlShell(),
       ),
-      home: const ControlShell(),
     );
   }
 }
@@ -133,7 +172,10 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
 
   Future<void> _pushDevices() async {
     try {
-      await _sms.setDevices(_cars.map((c) => c.deviceNumber).where((n) => n.isNotEmpty).toList());
+      await _sms.setDevices([
+        for (final c in _cars)
+          if (c.deviceNumber.isNotEmpty) (number: c.deviceNumber, id: c.id, name: c.vehicleName),
+      ]);
     } catch (_) {}
   }
 
@@ -206,6 +248,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     try {
       final garage = await _service.loadGarage();
       try { _snowOn = await _prefs.getBool('winterSnow') ?? true; } catch (_) { _snowOn = false; }
+      try { themeMode.value = themeFromName(await _prefs.getString('themeMode')); } catch (_) {}
       if (!mounted) return;
       setState(() {
         _cars = garage.cars;
@@ -220,6 +263,13 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   Future<void> _toggleSnow(bool value) async {
     setState(() => _snowOn = value);
     try { await _prefs.setBool('winterSnow', value); } catch (_) {}
+  }
+  Future<void> _setTheme(ThemeMode mode) async {
+    themeMode.value = mode;
+    try { await _prefs.setString('themeMode', mode.name); } catch (_) {}
+  }
+  Future<void> _openAppSettings() async {
+    try { await _sms.appSettings(); } catch (e) { _notice('$e', error: true); }
   }
   Future<void> _persist() async {
     await _service.saveGarage(_cars, _config.id);
@@ -566,49 +616,60 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final overlay = (p.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(
+        statusBarColor: Colors.transparent, systemNavigationBarColor: p.nav);
     if (_loading) {
-      return Scaffold(body: Center(child: Image.asset('assets/larin_cold_logo.png', width: 220,
-          errorBuilder: (context, error, stackTrace) => const SizedBox.shrink())));
+      return AnnotatedRegion<SystemUiOverlayStyle>(value: overlay, child: Scaffold(
+        body: Center(child: Image.asset('assets/larin_cold_logo.png', width: 220,
+          errorBuilder: (context, error, stackTrace) => const SizedBox.shrink()))));
     }
     final now = DateTime.now();
     final snow = _snowOn && isWinterSeason(now) && !MediaQuery.of(context).disableAnimations;
-    return Scaffold(
-      body: Stack(children: [
-        const Positioned.fill(child: SpeedStreaks()),
-        if (snow) const Positioned.fill(child: Snowfall()),
-        SafeArea(
-          bottom: false,
-          child: IndexedStack(index: _page, children: [
-            _HomeView(
-              config: _config,
-              now: now,
-              chooseCar: _chooseCar,
-              openMessages: _openMessages,
-              confirmPending: () => _confirmPending(manual: true),
-              reminder: _reminder,
-              send: _send,
-              call: _makeCall,
-              configure: _deviceDialog,
-              setTime: _setTime,
-            ),
-            _SettingsView(
-              config: _config,
-              chooseCar: _chooseCar,
-              deleteCar: _deleteCar,
-              notificationSettings: _notificationSettings,
-              send: _send,
-              configure: _deviceDialog,
-              manageNumber: _manageNumber,
-              configureUssd: _configureUssd,
-              smsGranted: _smsGranted,
-              enableReplies: _enableReplies,
-              snowOn: _snowOn,
-              toggleSnow: _toggleSnow,
-            ),
-          ]),
-        ),
-      ]),
-      bottomNavigationBar: _BottomBar(page: _page, select: (value) => setState(() => _page = value)),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlay,
+      child: Scaffold(
+        body: Stack(children: [
+          const Positioned.fill(child: SpeedStreaks()),
+          if (snow) const Positioned.fill(child: Snowfall()),
+          SafeArea(
+            bottom: false,
+            child: IndexedStack(index: _page, children: [
+              _HomeView(
+                config: _config,
+                now: now,
+                chooseCar: _chooseCar,
+                openMessages: _openMessages,
+                confirmPending: () => _confirmPending(manual: true),
+                reminder: _reminder,
+                send: _send,
+                call: _makeCall,
+                configure: _deviceDialog,
+                setTime: _setTime,
+              ),
+              _SettingsView(
+                config: _config,
+                chooseCar: _chooseCar,
+                deleteCar: _deleteCar,
+                notificationSettings: _notificationSettings,
+                send: _send,
+                configure: _deviceDialog,
+                manageNumber: _manageNumber,
+                configureUssd: _configureUssd,
+                smsGranted: _smsGranted,
+                enableReplies: _enableReplies,
+                openAppSettings: _openAppSettings,
+                autostartMaker: const ['xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus', 'vivo', 'huawei', 'honor']
+                    .any((m) => _maker.contains(m)),
+                snowOn: _snowOn,
+                toggleSnow: _toggleSnow,
+                setTheme: _setTheme,
+              ),
+            ]),
+          ),
+        ]),
+        bottomNavigationBar: _BottomBar(page: _page, select: (value) => setState(() => _page = value)),
+      ),
     );
   }
 }
@@ -619,9 +680,10 @@ class _BottomBar extends StatelessWidget {
   final ValueChanged<int> select;
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
     Widget item(int index, String label, Widget Function(Color) icon) {
       final active = page == index;
-      final color = active ? Brand.blue : Brand.muted;
+      final color = active ? p.accent : p.muted;
       return Expanded(child: Semantics(
         button: true, selected: active, label: label,
         child: InkWell(
@@ -635,7 +697,7 @@ class _BottomBar extends StatelessWidget {
       ));
     }
     return Container(
-      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFE2F0FC), width: 2))),
+      decoration: BoxDecoration(color: p.nav, border: Border(top: BorderSide(color: p.navBorder, width: 2))),
       child: SafeArea(top: false, child: SizedBox(height: 64, child: Row(children: [
         item(0, 'Управление', (c) => PowerGlyph(size: 22, color: c, width: 2.4)),
         item(1, 'Настройки', (c) => Icon(Icons.settings_outlined, color: c, size: 23)),
@@ -667,6 +729,7 @@ class _HomeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
     final configured = GsmProtocol.validPhone(config.deviceNumber);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -675,7 +738,6 @@ class _HomeView extends StatelessWidget {
         if (!configured) ...[
           const SizedBox(height: 8),
           _InfoStrip(
-            color: const Color(0xFFFFF4DD),
             icon: Icons.info_outline,
             message: 'Сначала укажите номер SIM-карты модуля.',
             action: TextButton(onPressed: configure, child: const Text('Настроить')),
@@ -704,26 +766,26 @@ class _HomeView extends StatelessWidget {
             ),
         ]),
         const SizedBox(height: 6),
-        Text('Выбор времени откроет SMS TIME:… для подтверждения.', style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
+        Text('Выбор времени откроет SMS TIME:… для подтверждения.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
         const SizedBox(height: 12),
         IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: _SoftButton(
             icon: Icons.notifications_none_rounded,
             onTap: reminder,
             child: config.reminderMinutes == null
-                ? Text('Напомнить о запуске', textAlign: TextAlign.center, style: brandText(14))
-                : Text.rich(TextSpan(text: 'Ежедневно в ', style: brandText(14), children: [
-                    TextSpan(text: _clock(config.reminderMinutes!), style: brandItalic(15, color: Brand.blue)),
+                ? Text('Напомнить о запуске', textAlign: TextAlign.center, style: brandText(14, color: p.text))
+                : Text.rich(TextSpan(text: 'Ежедневно в ', style: brandText(14, color: p.text), children: [
+                    TextSpan(text: _clock(config.reminderMinutes!), style: brandItalic(15, color: p.accent)),
                   ])),
           )),
           const SizedBox(width: 10),
           Expanded(child: _SoftButton(icon: Icons.chat_bubble_outline_rounded, onTap: openMessages,
-            child: Text('Переписка', style: brandText(14)))),
+            child: Text('Переписка', style: brandText(14, color: p.text)))),
         ])),
         const SizedBox(height: 16),
         Text('Управление работает только с номера, зарегистрированного в модуле. '
             'Команда отправляется обычной SMS.',
-          textAlign: TextAlign.center, style: brandText(11, color: Brand.muted, weight: FontWeight.w500, height: 1.35)),
+          textAlign: TextAlign.center, style: brandText(11, color: p.muted, weight: FontWeight.w500, height: 1.35)),
       ],
     );
   }
@@ -736,45 +798,49 @@ class _Header extends StatelessWidget {
   final String vehicle;
   final Future<void> Function() chooseCar, call;
   @override
-  Widget build(BuildContext context) => Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-    Image.asset('assets/larin_cold_logo.png', width: 140, height: 88, fit: BoxFit.contain, gaplessPlayback: true,
-      semanticLabel: 'Larin Cold',
-      errorBuilder: (context, error, stackTrace) => SizedBox(width: 140, height: 88,
-        child: Center(child: Text('LARIN COLD', style: brandItalic(18, color: Brand.blue))))),
-    const SizedBox(width: 8),
-    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      const StartBadge(),
-      const SizedBox(height: 8),
-      Material(
-        color: Colors.white,
-        shape: const StadiumBorder(side: BorderSide(color: Brand.lineSoft, width: 2)),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: chooseCar,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 5, 8, 5),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Flexible(child: Text(vehicle, maxLines: 1, overflow: TextOverflow.ellipsis, style: brandText(14))),
-              const SizedBox(width: 2),
-              const Icon(Icons.expand_more_rounded, size: 20, color: Brand.text),
-            ]),
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final pillBg = p.dark ? p.card : Colors.white;
+    return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+      Image.asset('assets/larin_cold_logo.png', width: 140, height: 88, fit: BoxFit.contain, gaplessPlayback: true,
+        semanticLabel: 'Larin Cold',
+        errorBuilder: (context, error, stackTrace) => SizedBox(width: 140, height: 88,
+          child: Center(child: Text('LARIN COLD', style: brandItalic(18, color: p.accent))))),
+      const SizedBox(width: 8),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        const StartBadge(),
+        const SizedBox(height: 8),
+        Material(
+          color: pillBg,
+          shape: StadiumBorder(side: BorderSide(color: p.lineSoft, width: 2)),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: chooseCar,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 5, 8, 5),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(child: Text(vehicle, maxLines: 1, overflow: TextOverflow.ellipsis, style: brandText(14, color: p.text))),
+                const SizedBox(width: 2),
+                Icon(Icons.expand_more_rounded, size: 20, color: p.text),
+              ]),
+            ),
+          ),
+        ),
+      ])),
+      Tooltip(
+        message: 'Позвонить на модуль',
+        child: Material(
+          color: pillBg,
+          shape: CircleBorder(side: BorderSide(color: p.lineSoft, width: 2)),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: call,
+            child: SizedBox(width: 46, height: 46, child: Icon(Icons.call_outlined, color: p.accent, size: 22)),
           ),
         ),
       ),
-    ])),
-    Tooltip(
-      message: 'Позвонить на модуль',
-      child: Material(
-        color: Colors.white,
-        shape: const CircleBorder(side: BorderSide(color: Brand.lineSoft, width: 2)),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: call,
-          child: const SizedBox(width: 46, height: 46, child: Icon(Icons.call_outlined, color: Brand.blue, size: 22)),
-        ),
-      ),
-    ),
-  ]);
+    ]);
+  }
 }
 
 class _ControlCard extends StatelessWidget {
@@ -786,6 +852,7 @@ class _ControlCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
     final remaining = config.secondsLeft(now);
     final running = config.endMs != null && remaining > 0;
     final total = config.endMs == null ? config.durationMinutes : config.cycleMinutes;
@@ -794,33 +861,37 @@ class _ControlCard extends StatelessWidget {
     final time = config.endMs == null
         ? '—:—'
         : '${(remaining ~/ 60).toString().padLeft(2, '0')}:${(remaining % 60).toString().padLeft(2, '0')}';
-    const outline = [
-      Shadow(color: Colors.white, offset: Offset(-2, -2)), Shadow(color: Colors.white, offset: Offset(2, -2)),
-      Shadow(color: Colors.white, offset: Offset(-2, 2)), Shadow(color: Colors.white, offset: Offset(2, 2)),
-      Shadow(color: Color(0x400B57C4), offset: Offset(0, 6), blurRadius: 12),
-    ];
+    final timeShadows = p.dark
+        ? const [Shadow(color: Color(0x8C4FAAFF), blurRadius: 18), Shadow(color: Color(0xFF0B57C4), offset: Offset(0, 3))]
+        : const [
+            Shadow(color: Colors.white, offset: Offset(-2, -2)), Shadow(color: Colors.white, offset: Offset(2, -2)),
+            Shadow(color: Colors.white, offset: Offset(-2, 2)), Shadow(color: Colors.white, offset: Offset(2, 2)),
+            Shadow(color: Color(0x400B57C4), offset: Offset(0, 6), blurRadius: 12),
+          ];
     return StickerCard(
       shadow: true,
-      ring: const Color(0xFFCFE7FB),
+      ring: p.cardRing,
       radius: 26,
       padding: EdgeInsets.zero,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(23),
         child: Stack(children: [
           Positioned(right: -58, bottom: -40, child: Transform.rotate(angle: .21,
-            child: const Opacity(opacity: .10, child: LogoSnowflake(size: 190)))),
+            child: Opacity(opacity: p.dark ? .14 : .10,
+              child: LogoSnowflake(size: 190, color: p.dark ? const Color(0xFF3FD27A) : Brand.green)))),
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
             child: Column(children: [
               SizedBox(width: 240, height: 240, child: CustomPaint(
                 painter: RingPainter(fraction: running ? remaining / (total * 60) : 0,
-                    color: confirmed ? Brand.green : Brand.blue),
+                    color: confirmed ? Brand.green : (p.dark ? const Color(0xFF1F7BE0) : Brand.blue),
+                    track: p.track, glow: p.dark && confirmed),
                 child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text(label, style: brandItalic(13, color: Brand.muted, weight: FontWeight.w800, letterSpacing: 1.5)),
-                  Text(time, style: brandItalic(62, color: Brand.blue, height: 1.05).copyWith(
-                    shadows: outline, fontFeatures: const [FontFeature.tabularFigures()])),
+                  Text(label, style: brandItalic(13, color: p.muted, weight: FontWeight.w800, letterSpacing: 1.5)),
+                  Text(time, style: brandItalic(62, color: p.numbers, height: 1.05).copyWith(
+                    shadows: timeShadows, fontFeatures: const [FontFeature.tabularFigures()])),
                   Text(config.endMs == null ? 'выбрано $total мин' : 'из $total мин',
-                    style: brandText(15, color: Brand.muted)),
+                    style: brandText(15, color: p.muted)),
                 ])),
               )),
               const SizedBox(height: 10),
@@ -833,11 +904,11 @@ class _ControlCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(children: [
-                  Expanded(child: SkewButton(label: 'ЗАПУСК', color: Brand.green, shadow: Brand.greenShadow,
-                    ring: Brand.greenRing, icon: const PowerGlyph(), onPressed: () => send(GsmProtocol.start))),
+                  Expanded(child: SkewButton(label: 'ЗАПУСК', color: Brand.green, shadow: p.greenShadow,
+                    ring: p.greenRing, icon: const PowerGlyph(), onPressed: () => send(GsmProtocol.start))),
                   const SizedBox(width: 14),
-                  Expanded(child: SkewButton(label: 'СТОП', color: Brand.red, shadow: Brand.redShadow,
-                    ring: Brand.redRing,
+                  Expanded(child: SkewButton(label: 'СТОП', color: Brand.red, shadow: p.redShadow,
+                    ring: p.redRing,
                     icon: Container(width: 15, height: 15, decoration: BoxDecoration(color: Colors.white,
                       borderRadius: BorderRadius.circular(2.5))),
                     onPressed: () => send(GsmProtocol.stop))),
@@ -859,12 +930,13 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
     final tone = statusTone(config, now);
     final (bg, fg, ring, dot) = switch (tone) {
-      StatusTone.on => (const Color(0xFFE5F7EA), const Color(0xFF11683A), Brand.greenRing, Brand.green),
-      StatusTone.waiting => (const Color(0xFFE6F0FF), Brand.blue, const Color(0xFFC9DDF7), Brand.blue),
-      StatusTone.warning => (const Color(0xFFFFF4DD), const Color(0xFF8A5A00), const Color(0xFFF3DDA8), const Color(0xFFE0A100)),
-      StatusTone.off || StatusTone.idle => (const Color(0xFFEEF3F9), Brand.muted, const Color(0xFFD6E2EF), const Color(0xFF9AAFC6)),
+      StatusTone.on => (p.onBg, p.onText, p.onRing, p.dark ? const Color(0xFF3FD27A) : Brand.green),
+      StatusTone.waiting => (p.waitBg, p.waitText, p.waitRing, p.waitText),
+      StatusTone.warning => (p.warnBg, p.warnText, p.warnRing, p.warnDot),
+      StatusTone.off || StatusTone.idle => (p.offBg, p.offText, p.offRing, p.offDot),
     };
     return Container(
       constraints: const BoxConstraints(minHeight: 38),
@@ -872,7 +944,7 @@ class _StatusPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(19),
-        border: Border.all(color: Colors.white, width: 2),
+        border: p.dark ? null : Border.all(color: Colors.white, width: 2),
         boxShadow: [BoxShadow(color: ring, spreadRadius: 1)],
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -887,7 +959,7 @@ class _StatusPill extends StatelessWidget {
         Tooltip(
           message: 'Узнать состояние (SMS STATUS)',
           child: Material(
-            color: Colors.white,
+            color: p.pillButton,
             shape: const CircleBorder(),
             child: InkWell(
               customBorder: const CircleBorder(),
@@ -909,14 +981,15 @@ class _Tile extends StatelessWidget {
   final bool warm;
   @override
   Widget build(BuildContext context) {
-    final labelColor = warm ? Brand.orangeText : Brand.muted;
-    final valueColor = warm ? Brand.orange : Brand.blue;
+    final p = Palette.of(context);
+    final labelColor = warm ? p.warmLabel : p.muted;
+    final valueColor = warm ? p.warmValue : p.numbers;
     return Container(
       decoration: BoxDecoration(
-        color: warm ? Brand.orangeBg : Colors.white,
+        color: warm ? p.warmBg : p.card,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [BoxShadow(color: warm ? Brand.orangeRing : Brand.line, spreadRadius: 2)],
+        border: Border.all(color: warm && !p.dark ? Colors.white : p.sticker, width: 2),
+        boxShadow: [BoxShadow(color: warm ? p.warmRing : p.ring, spreadRadius: 2)],
       ),
       child: Material(
         color: Colors.transparent,
@@ -945,30 +1018,33 @@ class _SoftButton extends StatelessWidget {
   final Widget child;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 50),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.white, width: 2),
-      boxShadow: const [BoxShadow(color: Brand.line, spreadRadius: 2)],
-    ),
-    child: Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, color: Brand.blue, size: 21),
-            const SizedBox(width: 7),
-            Flexible(child: child),
-          ]),
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 50),
+      decoration: BoxDecoration(
+        color: p.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: p.sticker, width: 2),
+        boxShadow: [BoxShadow(color: p.ring, spreadRadius: 2)],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(icon, color: p.accent, size: 21),
+              const SizedBox(width: 7),
+              Flexible(child: child),
+            ]),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SettingsView extends StatelessWidget {
@@ -983,11 +1059,15 @@ class _SettingsView extends StatelessWidget {
     required this.configureUssd,
     required this.smsGranted,
     required this.enableReplies,
+    required this.openAppSettings,
+    required this.autostartMaker,
     required this.snowOn,
     required this.toggleSnow,
+    required this.setTheme,
   });
   final bool smsGranted;
-  final Future<void> Function() enableReplies;
+  final Future<void> Function() enableReplies, openAppSettings;
+  final bool autostartMaker;
   final VehicleConfig config;
   final Future<void> Function() chooseCar, deleteCar, notificationSettings;
   final Future<void> Function(String) send;
@@ -996,14 +1076,44 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function() configureUssd;
   final bool snowOn;
   final Future<void> Function(bool) toggleSnow;
+  final Future<void> Function(ThemeMode) setTheme;
 
   @override
   Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final body = brandText(13, color: p.text, weight: FontWeight.w500, height: 1.35);
+    final small = brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35);
     return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 26), children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 14),
-        child: Text('Настройки', style: brandItalic(28)),
+        child: Text('Настройки', style: brandItalic(28, color: p.text)),
       ),
+      _SectionCard(title: 'Оформление', icon: Icons.dark_mode_outlined,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeMode,
+            builder: (context, mode, _) => Row(children: [
+              Expanded(child: _ThemeOption(label: 'Светлая', kind: ThemeMode.light, selected: mode == ThemeMode.light, onTap: setTheme)),
+              const SizedBox(width: 10),
+              Expanded(child: _ThemeOption(label: 'Тёмная', kind: ThemeMode.dark, selected: mode == ThemeMode.dark, onTap: setTheme)),
+              const SizedBox(width: 10),
+              Expanded(child: _ThemeOption(label: 'Как в телефоне', kind: ThemeMode.system, selected: mode == ThemeMode.system, onTap: setTheme)),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Text('«Как в телефоне» — тема меняется вместе с системной.', style: small),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: snowOn,
+            onChanged: toggleSnow,
+            secondary: const SizedBox(width: 24, height: 24, child: Center(child: LogoSnowflake(size: 22))),
+            title: Text('Зимний снег', style: brandText(14, color: p.text)),
+            subtitle: Text('С 1 декабря по 30 января. Не показывается, если анимация отключена в системе.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Автомобиль и SIM-карта', icon: Icons.directions_car_outlined,
         child: Column(children: [
           _DetailLine('Автомобиль', config.vehicleName),
@@ -1017,10 +1127,44 @@ class _SettingsView extends StatelessWidget {
         ]),
       ),
       const SizedBox(height: 14),
+      _SectionCard(title: 'Ответы модуля и уведомления', icon: Icons.mark_chat_read_outlined,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(smsGranted
+              ? 'Приём включён: экран обновляется по ответам модуля, а когда приложение закрыто, '
+                'ответ приходит уведомлением от Larin Cold Start.'
+              : 'Выключено: приложение показывает только расчётный таймер.',
+            style: body),
+          if (config.lastReply != null && config.lastReplyAt != null) ...[
+            const SizedBox(height: 8),
+            Text('Последний ответ, ${_replyTime(config.lastReplyAt!)}:', style: small),
+            Text(config.lastReply!, style: brandText(12, color: p.text)),
+          ],
+          if (!smsGranted) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
+              label: const Text('Включить приём ответов')),
+          ],
+          const SizedBox(height: 12),
+          Text('Советы', style: brandItalic(14, color: p.text, weight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text('• Звук в переписке с модулем в SMS-приложении можно выключить — '
+              'уведомления будут приходить от Larin Cold Start.', style: small),
+          Text('• В «Сведениях о приложении» выключите «Удалять разрешения, если приложение не используется», '
+              'иначе Android может отключить приём ответов.', style: small),
+          if (autostartMaker)
+            Text('• На вашем телефоне включите для Larin Cold Start «Автозапуск».', style: small),
+          const SizedBox(height: 6),
+          Align(alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: openAppSettings, child: const Text('Открыть сведения о приложении'))),
+          _ActionRow(title: 'Уведомления', description: 'Разрешения, звук и точное время',
+            icon: Icons.notifications_active_outlined, onTap: notificationSettings),
+        ]),
+      ),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Первый запуск', icon: Icons.person_add_alt_1_outlined,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('На новом модуле мастер регистрируется SMS с собственного номера '
-              'в течение 10 минут после включения.', style: brandText(13, weight: FontWeight.w500, height: 1.35)),
+              'в течение 10 минут после включения.', style: body),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: GsmProtocol.validPhone(config.ownerNumber)
@@ -1062,59 +1206,79 @@ class _SettingsView extends StatelessWidget {
         ]),
       ),
       const SizedBox(height: 14),
-      _SectionCard(title: 'Ответы модуля', icon: Icons.mark_chat_read_outlined,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(smsGranted
-              ? 'Приём включён: состояние обновляется по ответам модуля.'
-              : 'Выключено: приложение показывает только расчётный таймер.',
-            style: brandText(13, weight: FontWeight.w500, height: 1.35)),
-          if (config.lastReply != null && config.lastReplyAt != null) ...[
-            const SizedBox(height: 8),
-            Text('Последний ответ, ${_replyTime(config.lastReplyAt!)}:',
-              style: brandText(12, color: Brand.muted, weight: FontWeight.w500)),
-            Text(config.lastReply!, style: brandText(12)),
-          ],
-          if (!smsGranted) ...[
-            const SizedBox(height: 10),
-            FilledButton.icon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
-              label: const Text('Включить приём ответов')),
-          ],
-        ]),
-      ),
-      const SizedBox(height: 14),
-      _SectionCard(title: 'Уведомления и вид', icon: Icons.notifications_outlined,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _ActionRow(title: 'Уведомления', description: 'Разрешения, звук и точное время',
-            icon: Icons.notifications_active_outlined, onTap: notificationSettings),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: snowOn,
-            onChanged: toggleSnow,
-            secondary: const SizedBox(width: 24, height: 24, child: Center(child: LogoSnowflake(size: 22))),
-            title: Text('Зимний снег', style: brandText(14)),
-            subtitle: Text('С 1 декабря по 30 января. Не показывается, если анимация отключена в системе.',
-              style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
-          ),
-        ]),
-      ),
-      const SizedBox(height: 14),
       _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Larin Cold Start · приложение $appVersion', style: brandItalic(15, weight: FontWeight.w800)),
+          Text('Larin Cold Start · приложение $appVersion', style: brandItalic(15, color: p.text, weight: FontWeight.w800)),
           const SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '
-            'Интернет и сервер не требуются. Расходуется обычный пакет SMS и звонков.',
-            style: brandText(12, color: Brand.muted, weight: FontWeight.w500, height: 1.35)),
+            'Интернет и сервер не требуются. Расходуется обычный пакет SMS и звонков.', style: small),
           const SizedBox(height: 9),
           Text('Приложение читает только SMS с номеров модулей (если приём ответов включён), '
-            'не знает фактическое состояние горения и не гарантирует доставку сообщений. '
-            'Запуск отопителя в закрытом помещении запрещён.',
-            style: brandText(12, color: Brand.muted, weight: FontWeight.w500, height: 1.35)),
+            'никуда их не передаёт, не знает фактическое состояние горения и не гарантирует доставку сообщений. '
+            'Запуск отопителя в закрытом помещении запрещён.', style: small),
           const SizedBox(height: 9),
-          Text('Шрифт Exo 2 — SIL Open Font License.', style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
+          Text('Шрифт Exo 2 — SIL Open Font License.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
         ]),
       ),
     ]);
+  }
+}
+
+/// Карточка выбора темы с маленьким эскизом экрана.
+class _ThemeOption extends StatelessWidget {
+  const _ThemeOption({required this.label, required this.kind, required this.selected, required this.onTap});
+  final String label;
+  final ThemeMode kind;
+  final bool selected;
+  final Future<void> Function(ThemeMode) onTap;
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    Widget half(Palette s) => Container(color: s.canvas, child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 30, height: 30, decoration: BoxDecoration(shape: BoxShape.circle,
+        border: Border.all(color: s.track, width: 4))),
+      const SizedBox(height: 6),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 14, height: 8, decoration: BoxDecoration(color: Brand.green, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(width: 3),
+        Container(width: 14, height: 8, decoration: BoxDecoration(color: Brand.red, borderRadius: BorderRadius.circular(2))),
+      ]),
+      const SizedBox(height: 5),
+      Container(width: 34, height: 8, decoration: BoxDecoration(color: s.card, borderRadius: BorderRadius.circular(2),
+        border: Border.all(color: s.ring))),
+    ])));
+    final preview = switch (kind) {
+      ThemeMode.light => half(Palette.light),
+      ThemeMode.dark => half(Palette.darkPalette),
+      ThemeMode.system => Row(children: [
+          Expanded(child: ClipRect(child: OverflowBox(maxWidth: 60, alignment: Alignment.centerLeft, child: SizedBox(width: 60, child: half(Palette.light))))),
+          Expanded(child: ClipRect(child: OverflowBox(maxWidth: 60, alignment: Alignment.centerRight, child: SizedBox(width: 60, child: half(Palette.darkPalette))))),
+        ]),
+    };
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Тема: $label',
+      child: Material(
+        color: selected ? (p.dark ? const Color(0xFF10305E) : const Color(0xFFE6F0FF)) : p.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: selected ? p.accent : p.line, width: 2)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => onTap(kind),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
+            child: Column(children: [
+              ClipRRect(borderRadius: BorderRadius.circular(10),
+                child: SizedBox(width: 60, height: 84, child: preview)),
+              const SizedBox(height: 7),
+              Text(label, textAlign: TextAlign.center, maxLines: 2,
+                style: selected ? brandItalic(13, color: p.accent) : brandText(13, color: p.text)),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1130,36 +1294,39 @@ class _SectionCard extends StatelessWidget {
   final IconData icon;
   final Widget child;
   @override
-  Widget build(BuildContext context) => StickerCard(
-    radius: 22,
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [Icon(icon, color: Brand.blue, size: 23), const SizedBox(width: 9),
-        Flexible(child: Text(title, style: brandItalic(17, weight: FontWeight.w800)))]),
-      const SizedBox(height: 12),
-      child,
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return StickerCard(
+      radius: 22,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Icon(icon, color: p.accent, size: 23), const SizedBox(width: 9),
+          Flexible(child: Text(title, style: brandItalic(17, color: p.text, weight: FontWeight.w800)))]),
+        const SizedBox(height: 12),
+        child,
+      ]),
+    );
+  }
 }
 
 class _InfoStrip extends StatelessWidget {
-  const _InfoStrip({required this.color, required this.icon,
-    required this.message, this.action});
-  final Color color;
+  const _InfoStrip({required this.icon, required this.message, this.action});
   final IconData icon;
   final String message;
   final Widget? action;
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(13, 8, 8, 8),
-    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.white, width: 2),
-      boxShadow: const [BoxShadow(color: Color(0xFFF3DDA8), spreadRadius: 1)]),
-    child: Row(children: [
-      Icon(icon, color: Brand.text, size: 20), const SizedBox(width: 10),
-      Expanded(child: Text(message, style: brandText(13, height: 1.35))),
-      if (action != null) action!,
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 8, 8, 8),
+      decoration: BoxDecoration(color: p.warnBg, borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: p.warnRing, spreadRadius: 1)]),
+      child: Row(children: [
+        Icon(icon, color: p.warnText, size: 20), const SizedBox(width: 10),
+        Expanded(child: Text(message, style: brandText(13, color: p.warnText, height: 1.35))),
+        if (action != null) action!,
+      ]),
+    );
+  }
 }
 
 class _DetailLine extends StatelessWidget {
@@ -1167,13 +1334,16 @@ class _DetailLine extends StatelessWidget {
   final String label;
   final String value;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(children: [
-      Expanded(child: Text(label, style: brandText(12, color: Brand.muted, weight: FontWeight.w500))),
-      Flexible(child: Text(value, textAlign: TextAlign.right, style: brandText(12))),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(children: [
+        Expanded(child: Text(label, style: brandText(12, color: p.muted, weight: FontWeight.w500))),
+        Flexible(child: Text(value, textAlign: TextAlign.right, style: brandText(12, color: p.text))),
+      ]),
+    );
+  }
 }
 
 class _ActionRow extends StatelessWidget {
@@ -1184,12 +1354,15 @@ class _ActionRow extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Material(color: Colors.transparent, child: ListTile(
-    contentPadding: EdgeInsets.zero,
-    leading: Icon(icon, color: Brand.blue),
-    title: Text(title, style: brandText(14)),
-    subtitle: Text(description, style: brandText(11, color: Brand.muted, weight: FontWeight.w500)),
-    trailing: const Icon(Icons.chevron_right_rounded, color: Brand.muted),
-    onTap: onTap,
-  ));
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Material(color: Colors.transparent, child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, color: p.accent),
+      title: Text(title, style: brandText(14, color: p.text)),
+      subtitle: Text(description, style: brandText(11, color: p.muted, weight: FontWeight.w500)),
+      trailing: Icon(Icons.chevron_right_rounded, color: p.muted),
+      onTap: onTap,
+    ));
+  }
 }

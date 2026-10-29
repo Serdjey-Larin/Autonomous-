@@ -100,7 +100,7 @@ assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.6.1+161', s, flags=re.M))
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.7.0+170', s, flags=re.M))
 assert any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
 assert not any(e.get(ns+'name') == 'android.permission.READ_SMS' for e in m.findall('uses-permission'))
 assert m.find("./application/receiver[@{0}name='.SmsReceiver']".format(ns)).get(ns+'permission') == 'android.permission.BROADCAST_SMS'
@@ -144,29 +144,35 @@ splash_icon = (
     '<target android:name="snow" android:animation="@animator/splash_snow"/>'
     '<target android:name="power" android:animation="@animator/splash_power"/>'
     '</animated-vector>')
-launch_bg = ('<layer-list xmlns:android="http://schemas.android.com/apk/res/android">'
-             '<item><shape><solid android:color="#F3F9FF"/></shape></item>'
-             '<item android:gravity="center" android:width="144dp" android:height="144dp" android:drawable="@drawable/splash_icon"/>'
-             '</layer-list>')
-for folder in ['drawable', 'drawable-v21']:
+def launch_bg(color):
+    return ('<layer-list xmlns:android="http://schemas.android.com/apk/res/android">'
+            '<item><shape><solid android:color="%s"/></shape></item>'
+            '<item android:gravity="center" android:width="144dp" android:height="144dp" android:drawable="@drawable/splash_icon"/>'
+            '</layer-list>' % color)
+# Светлая заставка днём, тёмная — если в телефоне включена тёмная тема.
+for folder, color in [('drawable', '#F3F9FF'), ('drawable-v21', '#F3F9FF'),
+                      ('drawable-night', '#061A38'), ('drawable-night-v21', '#061A38')]:
     (res/folder).mkdir(parents=True, exist_ok=True)
-    (res/folder/'launch_background.xml').write_text(launch_bg)
-styles_v31 = ('<?xml version="1.0" encoding="utf-8"?><resources>'
+    (res/folder/'launch_background.xml').write_text(launch_bg(color))
+    (res/folder/'normal_background.xml').write_text(
+        '<shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="%s"/></shape>' % color)
+def styles_v31(color):
+    return ('<?xml version="1.0" encoding="utf-8"?><resources>'
     '<style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">'
     '<item name="android:forceDarkAllowed">false</item>'
     '<item name="android:windowFullscreen">false</item>'
     '<item name="android:windowDrawsSystemBarBackgrounds">false</item>'
-    '<item name="android:windowSplashScreenBackground">#F3F9FF</item>'
+    '<item name="android:windowSplashScreenBackground">%s</item>'
     '<item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_animated</item>'
     '<item name="android:windowSplashScreenAnimationDuration">900</item>'
     '<item name="android:windowBackground">@drawable/launch_background</item>'
     '</style>'
     '<style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">'
-    '<item name="android:windowBackground">?android:colorBackground</item>'
-    '</style></resources>')
-for folder in ['values-v31', 'values-night-v31']:
+    '<item name="android:windowBackground">@drawable/normal_background</item>'
+    '</style></resources>') % color
+for folder, color in [('values-v31', '#F3F9FF'), ('values-night-v31', '#061A38')]:
     (res/folder).mkdir(parents=True, exist_ok=True)
-    (res/folder/'styles.xml').write_text(styles_v31)
+    (res/folder/'styles.xml').write_text(styles_v31(color))
 print('Android SMS receiver, permission, launcher icon, splash and version configured')
 
 (res/'drawable/notification_icon.xml').write_text('<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M7,5 A9,9 0,1 0,17 5 M12,2 L12,12"/></vector>')

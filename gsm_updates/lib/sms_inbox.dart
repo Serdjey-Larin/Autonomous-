@@ -14,8 +14,12 @@ class SmsInboxBridge {
     });
   }
 
-  Future<void> setDevices(List<String> numbers) =>
-      channel.invokeMethod<void>('setDevices', {'numbers': numbers});
+  /// Номера модулей (фильтр приёма) и названия машин (для уведомлений).
+  Future<void> setDevices(List<({String number, String id, String name})> cars) =>
+      channel.invokeMethod<void>('setDevices', {
+        'numbers': [for (final c in cars) c.number],
+        'cars': [for (final c in cars) {'number': c.number, 'id': c.id, 'name': c.name}],
+      });
 
   Future<List<InboundSms>> drain(int afterSeq) async {
     final rows = await channel.invokeMethod<List<Object?>>('drain', {'after': afterSeq}) ?? const [];

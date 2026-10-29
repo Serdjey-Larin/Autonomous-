@@ -56,7 +56,8 @@ class MainActivity : FlutterActivity() {
             try {
                 when (call.method) {
                     "setDevices" -> {
-                        SmsInbox.setDevices(this, call.argument<List<String>>("numbers") ?: emptyList())
+                        SmsInbox.setDevices(this, call.argument<List<String>>("numbers") ?: emptyList(),
+                            call.argument<List<Map<*, *>>>("cars") ?: emptyList())
                         result.success(null)
                     }
                     "drain" -> result.success(SmsInbox.drain(this, (call.argument<Number>("after") ?: 0).toLong()))
@@ -84,6 +85,8 @@ class MainActivity : FlutterActivity() {
         if(requestCode==149){pending?.success(allowed());pending=null}
         if(requestCode==150){smsPending?.success(smsAllowed());smsPending=null}
     }
+    override fun onResume() { super.onResume(); SmsInbox.foreground = true }
+    override fun onPause() { SmsInbox.foreground = false; super.onPause() }
     override fun onDestroy(){
         pending?.success(false);pending=null
         smsPending?.success(false);smsPending=null

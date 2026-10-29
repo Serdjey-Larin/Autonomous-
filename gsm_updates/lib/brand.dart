@@ -32,13 +32,82 @@ class Brand {
   static const snowLight = Color(0xFFA9D8FF);
 }
 
-/// Курсив логотипа: 800/900 italic.
-TextStyle brandItalic(double size, {Color color = Brand.text, FontWeight weight = FontWeight.w900,
+/// Цвета, которые зависят от темы (светлая / тёмная). Читать через [Palette.of].
+@immutable
+class Palette extends ThemeExtension<Palette> {
+  const Palette({
+    required this.dark,
+    required this.canvas, required this.card, required this.sticker, required this.ring, required this.cardRing,
+    required this.text, required this.muted, required this.accent, required this.numbers,
+    required this.track, required this.line, required this.lineSoft, required this.chipOn, required this.chipOnRing,
+    required this.warmBg, required this.warmRing, required this.warmLabel, required this.warmValue,
+    required this.streaks, required this.nav, required this.navBorder, required this.cardShadow,
+    required this.greenRing, required this.redRing, required this.greenShadow, required this.redShadow,
+    required this.onBg, required this.onText, required this.onRing,
+    required this.waitBg, required this.waitText, required this.waitRing,
+    required this.warnBg, required this.warnText, required this.warnRing, required this.warnDot,
+    required this.offBg, required this.offText, required this.offRing, required this.offDot,
+    required this.pillButton,
+  });
+  final bool dark;
+  final Color canvas, card, sticker, ring, cardRing, text, muted, accent, numbers, track, line, lineSoft,
+      chipOn, chipOnRing, warmBg, warmRing, warmLabel, warmValue, nav, navBorder, cardShadow,
+      greenRing, redRing, greenShadow, redShadow,
+      onBg, onText, onRing, waitBg, waitText, waitRing, warnBg, warnText, warnRing, warnDot,
+      offBg, offText, offRing, offDot, pillButton;
+  final List<Color> streaks;
+
+  static const light = Palette(
+    dark: false,
+    canvas: Color(0xFFF3F9FF), card: Colors.white, sticker: Colors.white, ring: Color(0xFFD4E8FA),
+    cardRing: Color(0xFFCFE7FB), text: Color(0xFF08306E), muted: Color(0xFF4E6A8E),
+    accent: Color(0xFF0B57C4), numbers: Color(0xFF0B57C4), track: Color(0xFFE2F1FF),
+    line: Color(0xFFD4E8FA), lineSoft: Color(0xFFCFE3F7), chipOn: Color(0xFF0B57C4), chipOnRing: Color(0xFF9CC7F2),
+    warmBg: Color(0xFFFFF7F1), warmRing: Color(0xFFF6D2B8), warmLabel: Color(0xFF8A4B1D), warmValue: Color(0xFFB5531C),
+    streaks: [Color(0xFFCFEAFF), Color(0xFFDDF1FF), Color(0xFFD6EEFF)],
+    nav: Colors.white, navBorder: Color(0xFFE2F0FC), cardShadow: Color(0x1A0B57C4),
+    greenRing: Color(0xFFBFE8CB), redRing: Color(0xFFF2C9CC),
+    greenShadow: Color(0xFF14803A), redShadow: Color(0xFF8F1F27),
+    onBg: Color(0xFFE5F7EA), onText: Color(0xFF11683A), onRing: Color(0xFFBFE8CB),
+    waitBg: Color(0xFFE6F0FF), waitText: Color(0xFF0B57C4), waitRing: Color(0xFFC9DDF7),
+    warnBg: Color(0xFFFFF4DD), warnText: Color(0xFF7A5000), warnRing: Color(0xFFF3DDA8), warnDot: Color(0xFFE0A100),
+    offBg: Color(0xFFEEF3F9), offText: Color(0xFF4E6A8E), offRing: Color(0xFFD6E2EF), offDot: Color(0xFF9AAFC6),
+    pillButton: Colors.white,
+  );
+
+  static const darkPalette = Palette(
+    dark: true,
+    canvas: Color(0xFF061A38), card: Color(0xFF0D2A55), sticker: Color(0xFF0D2A55), ring: Color(0xFF1D4C8A),
+    cardRing: Color(0xFF1D4C8A), text: Color(0xFFEAF5FF), muted: Color(0xFFA9C3E3),
+    accent: Color(0xFF8FD0FF), numbers: Colors.white, track: Color(0xFF173F75),
+    line: Color(0xFF1D4C8A), lineSoft: Color(0xFF1D4C8A), chipOn: Color(0xFF1F7BE0), chipOnRing: Color(0xFF1D4C8A),
+    warmBg: Color(0xFF2A1E1A), warmRing: Color(0xFF7A4A26), warmLabel: Color(0xFFF3C6A2), warmValue: Color(0xFFFFB27A),
+    streaks: [Color(0xFF12396B), Color(0xFF0F3060), Color(0xFF10335F)],
+    nav: Color(0xFF081F42), navBorder: Color(0xFF12396B), cardShadow: Color(0x59000000),
+    greenRing: Color(0x00000000), redRing: Color(0x00000000),
+    greenShadow: Color(0xFF0E6B30), redShadow: Color(0xFF7A1A22),
+    onBg: Color(0xFF0F3B33), onText: Color(0xFFA8F0C4), onRing: Color(0xFF1F6A4A),
+    waitBg: Color(0xFF10305E), waitText: Color(0xFF8FD0FF), waitRing: Color(0xFF1D4C8A),
+    warnBg: Color(0xFF33290E), warnText: Color(0xFFFFD27A), warnRing: Color(0xFF6B5520), warnDot: Color(0xFFFFC23D),
+    offBg: Color(0xFF12294A), offText: Color(0xFFA9C3E3), offRing: Color(0xFF24497A), offDot: Color(0xFF7D97B8),
+    pillButton: Color(0x1FFFFFFF),
+  );
+
+  static Palette of(BuildContext context) => Theme.of(context).extension<Palette>() ?? light;
+
+  @override
+  Palette copyWith() => this;
+  @override
+  Palette lerp(Palette? other, double t) => t < .5 || other == null ? this : other;
+}
+
+/// Курсив логотипа: 800/900 italic. Без цвета — берётся цвет текста темы.
+TextStyle brandItalic(double size, {Color? color, FontWeight weight = FontWeight.w900,
         double? letterSpacing, double? height}) =>
     TextStyle(fontFamily: brandFont, fontSize: size, fontWeight: weight, fontStyle: FontStyle.italic,
         color: color, letterSpacing: letterSpacing, height: height);
 
-TextStyle brandText(double size, {Color color = Brand.text, FontWeight weight = FontWeight.w700, double? height}) =>
+TextStyle brandText(double size, {Color? color, FontWeight weight = FontWeight.w700, double? height}) =>
     TextStyle(fontFamily: brandFont, fontSize: size, fontWeight: weight, color: color, height: height);
 
 const _skew = -0.1745; // −10°, как у кнопок на логотипе
@@ -224,11 +293,13 @@ class _SnowPainter extends CustomPainter {
 class SpeedStreaks extends StatelessWidget {
   const SpeedStreaks({super.key});
   @override
-  Widget build(BuildContext context) => const IgnorePointer(child: CustomPaint(painter: _StreaksPainter(), size: Size.infinite));
+  Widget build(BuildContext context) =>
+      IgnorePointer(child: CustomPaint(painter: _StreaksPainter(Palette.of(context).streaks), size: Size.infinite));
 }
 
 class _StreaksPainter extends CustomPainter {
-  const _StreaksPainter();
+  const _StreaksPainter(this.colors);
+  final List<Color> colors;
   @override
   void paint(Canvas canvas, Size size) {
     void streak(double x, double y, double w, double h, Color c) {
@@ -238,13 +309,13 @@ class _StreaksPainter extends CustomPainter {
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(h / 2)), Paint()..color = c);
       canvas.restore();
     }
-    streak(-40, 34, 260, 7, const Color(0xFFCFEAFF));
-    streak(10, 52, 180, 5, const Color(0xFFDDF1FF));
-    streak(size.width * .38, 104, 280, 6, const Color(0xFFD6EEFF));
+    streak(-40, 34, 260, 7, colors[0]);
+    streak(10, 52, 180, 5, colors[1]);
+    streak(size.width * .38, 104, 280, 6, colors[2]);
   }
 
   @override
-  bool shouldRepaint(_StreaksPainter old) => false;
+  bool shouldRepaint(_StreaksPainter old) => old.colors != colors;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,27 +324,30 @@ class _StreaksPainter extends CustomPainter {
 /// Белая «наклейка»: белая обводка 3 и тонкое голубое кольцо снаружи.
 class StickerCard extends StatelessWidget {
   const StickerCard({super.key, required this.child, this.padding = const EdgeInsets.all(16),
-      this.radius = 24, this.ring = Brand.line, this.color = Colors.white, this.shadow = false});
+      this.radius = 24, this.ring, this.color, this.shadow = false});
   final Widget child;
   final EdgeInsets padding;
   final double radius;
-  final Color ring;
-  final Color color;
+  final Color? ring;
+  final Color? color;
   final bool shadow;
   @override
-  Widget build(BuildContext context) => Container(
-        padding: padding,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: Colors.white, width: 3),
-          boxShadow: [
-            BoxShadow(color: ring, spreadRadius: 2),
-            if (shadow) const BoxShadow(color: Color(0x1A0B57C4), blurRadius: 24, offset: Offset(0, 10)),
-          ],
-        ),
-        child: child,
-      );
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: color ?? p.card,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: p.sticker, width: 3),
+        boxShadow: [
+          BoxShadow(color: ring ?? p.ring, spreadRadius: 2),
+          if (shadow) BoxShadow(color: p.cardShadow, blurRadius: 24, offset: const Offset(0, 10)),
+        ],
+      ),
+      child: child,
+    );
+  }
 }
 
 /// Скошенная кнопка ЗАПУСК / СТОП с «твёрдой» тенью снизу.
@@ -342,7 +416,9 @@ class SkewChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Semantics(
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Semantics(
         button: true,
         selected: selected,
         child: GestureDetector(
@@ -356,10 +432,10 @@ class SkewChip extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 44),
               padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
               decoration: BoxDecoration(
-                color: selected ? Brand.blue : Colors.white,
+                color: selected ? p.chipOn : (p.dark ? Colors.transparent : Colors.white),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: selected ? Colors.white : Brand.line, width: 2),
-                boxShadow: selected ? const [BoxShadow(color: Brand.blueRing, spreadRadius: 2)] : null,
+                border: Border.all(color: selected ? Colors.white : p.line, width: 2),
+                boxShadow: selected ? [BoxShadow(color: p.chipOnRing, spreadRadius: 2)] : null,
               ),
               child: Transform(
                 alignment: Alignment.center,
@@ -367,12 +443,13 @@ class SkewChip extends StatelessWidget {
                 child: Text(label, textAlign: TextAlign.center,
                     style: selected
                         ? brandItalic(14, color: Colors.white)
-                        : brandText(14, color: Brand.text)),
+                        : brandText(14, color: p.text)),
               ),
             ),
           ),
         ),
       );
+  }
 }
 
 /// Значок START рядом с логотипом.
@@ -386,7 +463,7 @@ class StartBadge extends StatelessWidget {
           decoration: BoxDecoration(
             color: Brand.green,
             border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Brand.greenShadow, offset: Offset(0, 3))],
+            boxShadow: [BoxShadow(color: Palette.of(context).greenShadow, offset: const Offset(0, 3))],
           ),
           child: Transform(
             transform: Matrix4.skewX(0.21),
@@ -400,7 +477,10 @@ class StartBadge extends StatelessWidget {
 // Кольцо таймера.
 
 class RingPainter extends CustomPainter {
-  RingPainter({required this.fraction, required this.color});
+  RingPainter({required this.fraction, required this.color, this.track = const Color(0xFFE2F1FF), this.glow = false});
+  final Color track;
+  /// Тёмная тема: мягкое свечение под дугой.
+  final bool glow;
   /// Доля оставшегося времени 0..1.
   final double fraction;
   final Color color;
@@ -411,7 +491,7 @@ class RingPainter extends CustomPainter {
     final r = 110 * k;
     final rect = Rect.fromCircle(center: c, radius: r);
     canvas.drawCircle(c, r, Paint()
-      ..color = Brand.track
+      ..color = track
       ..style = PaintingStyle.stroke
       ..strokeWidth = 20 * k);
     if (fraction <= 0) return;
@@ -421,6 +501,10 @@ class RingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = w
       ..strokeCap = StrokeCap.round;
+    if (glow) {
+      canvas.drawArc(rect, -math.pi / 2, sweep, false, arc(color.withValues(alpha: .45), 22 * k)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7));
+    }
     canvas.drawArc(rect, -math.pi / 2, sweep, false, arc(Colors.white, 24 * k));
     canvas.drawArc(rect, -math.pi / 2, sweep, false, arc(color, 18 * k));
     if (sweep > .2) {
@@ -431,7 +515,8 @@ class RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(RingPainter old) => old.fraction != fraction || old.color != color;
+  bool shouldRepaint(RingPainter old) =>
+      old.fraction != fraction || old.color != color || old.track != track || old.glow != glow;
 }
 
 /// Значок питания (белый) для кнопки ЗАПУСК и нижнего меню.
