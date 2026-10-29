@@ -32,6 +32,8 @@ env:
 jobs:
   android:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # только для публикации готового APK в служебную ветку apk-builds
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -178,6 +180,26 @@ jobs:
             apk-signature.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish APK to apk-builds branch
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version:' larin_gsm_control/pubspec.yaml | sed -E 's/version: *([^+]+).*/\1/')
+          mkdir -p "$RUNNER_TEMP/apkpub"
+          cp larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/apkpub/LARIN-GSM-$VERSION.apk"
+          cp apk-signature.txt "$RUNNER_TEMP/apkpub/LARIN-GSM-$VERSION-signature.txt"
+          cd "$RUNNER_TEMP/apkpub"
+          git init -q
+          git checkout -q -b apk-builds
+          git add .
+          git -c user.name="LARIN GSM CI" -c user.email="ci@larincold.invalid" commit -q -m "APK $VERSION from $GITHUB_REF_NAME@${GITHUB_SHA::7}"
+          # Ветка содержит только последний APK: история перезаписывается, репозиторий не разрастается.
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
+          echo "APK $VERSION опубликован в ветке apk-builds" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove key from runner
         if: always()
