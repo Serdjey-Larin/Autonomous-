@@ -97,6 +97,14 @@ if 'LARIN_KEYSTORE_PATH' not in g:
                   'signingConfigs.getByName("debug") else signingConfigs.getByName("release")', 1)
     gradle_file.write_text(g)
 assert 'signingConfigs.getByName("release")' in gradle_file.read_text()
+# Только ARM: иначе на x86_64-устройстве нашлись бы библиотеки плагинов без libflutter.so.
+g = gradle_file.read_text()
+if 'abiFilters' not in g:
+    anchor = '    defaultConfig {'
+    assert g.count(anchor) == 1, 'Flutter template changed: defaultConfig not found'
+    g = g.replace(anchor, anchor + '\n        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }', 1)
+    gradle_file.write_text(g)
+assert 'abiFilters' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
