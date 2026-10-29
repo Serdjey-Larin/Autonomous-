@@ -1103,14 +1103,14 @@ class _SettingsView extends StatelessWidget {
           const SizedBox(height: 10),
           Text('«Как в телефоне» — тема меняется вместе с системной.', style: small),
           const SizedBox(height: 4),
-          SwitchListTile(
+          Material(color: Colors.transparent, child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: snowOn,
             onChanged: toggleSnow,
             secondary: const SizedBox(width: 24, height: 24, child: Center(child: LogoSnowflake(size: 22))),
             title: Text('Зимний снег', style: brandText(14, color: p.text)),
             subtitle: Text('С 1 декабря по 30 января. Не показывается, если анимация отключена в системе.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
-          ),
+          ))
         ]),
       ),
       const SizedBox(height: 14),
