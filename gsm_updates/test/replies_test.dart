@@ -218,7 +218,8 @@ void main() {
       expect(statusTone(car, t0.add(const Duration(minutes: 1))), StatusTone.on);
       expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Прогрев запущен · SMS в 07:00');
       expect(batteryText(car), '14,6 В');
-      expect(statusTone(car, t0.add(const Duration(minutes: 30))), StatusTone.warning);
+      expect(statusTone(car, t0.add(const Duration(minutes: 30))), StatusTone.off);
+      expect(statusLine(car, t0.add(const Duration(minutes: 30))), 'Прогрев завершён по таймеру');
       applyReply(car, sms(2, '+79281050233', statusOff, t0.add(const Duration(minutes: 31))));
       expect(statusTone(car, t0.add(const Duration(minutes: 32))), StatusTone.off);
       expect(statusLine(car, t0.add(const Duration(minutes: 32))), 'Прогрев выключен · SMS в 07:31');
@@ -239,6 +240,15 @@ void main() {
       expect(parseReply('USSD: Vash balans 87').balance, 87);
       final car = VehicleConfig(id: 'a', balanceRub: 250.5, balanceAt: 1);
       expect(balanceAmount(car), '250,50 ₽');
+    });
+    test('last STATUS stays valid for 5 hours', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, sms(1, '+79281050233', statusOn, t0));
+      expect(statusLine(car, t0.add(const Duration(minutes: 13))), 'Прогрев запущен · SMS в 07:00');
+      expect(confirmedOn(car, t0.add(const Duration(minutes: 13))), isTrue);
+      expect(statusLine(car, t0.add(const Duration(hours: 4))), 'Прогрев завершён по таймеру');
+      expect(statusLine(car, t0.add(const Duration(hours: 5, minutes: 1))), 'Данные от 29.10 07:00 устарели · обновите состояние');
+      expect(statusTone(car, t0.add(const Duration(hours: 5, minutes: 1))), StatusTone.warning);
     });
     test('winter snow season is 1 December – 30 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);

@@ -350,10 +350,11 @@ class SkewChip extends StatelessWidget {
           child: Transform(
             alignment: Alignment.center,
             transform: Matrix4.skewX(_skew),
+            // Без alignment и фиксированной высоты: внутри Wrap фишка по ширине текста,
+            // иначе Container растягивается на всю строку.
             child: Container(
-              height: 38,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              alignment: Alignment.center,
+              constraints: const BoxConstraints(minWidth: 44),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
               decoration: BoxDecoration(
                 color: selected ? Brand.blue : Colors.white,
                 borderRadius: BorderRadius.circular(10),
@@ -363,7 +364,7 @@ class SkewChip extends StatelessWidget {
               child: Transform(
                 alignment: Alignment.center,
                 transform: Matrix4.skewX(-_skew),
-                child: Text(label,
+                child: Text(label, textAlign: TextAlign.center,
                     style: selected
                         ? brandItalic(14, color: Colors.white)
                         : brandText(14, color: Brand.text)),

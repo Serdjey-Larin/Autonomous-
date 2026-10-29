@@ -13,8 +13,8 @@ import 'reply_parser.dart';
 /// Ответ ждём не дольше этого — дальше «ответа нет».
 const replyTimeout = Duration(minutes: 15);
 
-/// STATUS старше этого считается устаревшим.
-const statusFreshness = Duration(minutes: 10);
+/// Последний ответ STATUS считается актуальным 5 часов, потом «данные устарели».
+const statusFreshness = Duration(hours: 5);
 
 /// Входящее SMS от модуля (из нативного журнала).
 class InboundSms {
@@ -170,19 +170,26 @@ bool applyUserSent(VehicleConfig car, String command, DateTime now) {
   return false;
 }
 
+String _dayClock(int ms) {
+  final t = DateTime.fromMillisecondsSinceEpoch(ms);
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(t.day)}.${two(t.month)} ${two(t.hour)}:${two(t.minute)}';
+}
+
 String _clock(int ms) {
   final t = DateTime.fromMillisecondsSinceEpoch(ms);
   return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
 
-/// Свежий STATUS: не старше 10 минут и (для «включён») расчётное время не вышло.
+/// Ответ STATUS не старше 5 часов.
 bool statusFresh(VehicleConfig car, DateTime now) {
   if (car.outAt == null || car.outState == null) return false;
-  final nowMs = now.millisecondsSinceEpoch;
-  if (nowMs - car.outAt! > statusFreshness.inMilliseconds) return false;
-  if (car.outState == 'on' && (car.endMs == null || car.endMs! <= nowMs)) return false;
-  return true;
+  return now.millisecondsSinceEpoch - car.outAt! <= statusFreshness.inMilliseconds;
 }
+
+/// По STATUS прогрев был запущен, и отсчёт ещё идёт.
+bool _runningByStatus(VehicleConfig car, DateTime now) =>
+    car.outState == 'on' && car.endMs != null && car.endMs! > now.millisecondsSinceEpoch;
 
 /// После звонка выход переключён, а STATUS ещё не пришёл.
 bool afterCall(VehicleConfig car) =>
@@ -190,7 +197,7 @@ bool afterCall(VehicleConfig car) =>
 
 /// Выход включён по свежему STATUS — только тогда показываем «работу» цветом.
 bool confirmedOn(VehicleConfig car, DateTime now) =>
-    car.outState == 'on' && statusFresh(car, now) && car.basis == 'status' && !afterCall(car);
+    _runningByStatus(car, now) && statusFresh(car, now) && car.basis == 'status' && !afterCall(car);
 
 /// Пользователь позвонил на модуль: звонок переключает выход, поэтому прежний
 /// расчётный отсчёт больше не верен. Точное время даст ответ на STATUS.
@@ -237,7 +244,7 @@ StatusTone statusTone(VehicleConfig car, DateTime now) {
   }
   if (car.outState != null && car.outAt != null) {
     if (!statusFresh(car, now)) return StatusTone.warning;
-    return car.outState == 'on' ? StatusTone.on : StatusTone.off;
+    return _runningByStatus(car, now) ? StatusTone.on : StatusTone.off;
   }
   return StatusTone.idle;
 }
@@ -267,10 +274,11 @@ String statusLine(VehicleConfig car, DateTime now) {
   }
   if (car.outState != null && car.outAt != null) {
     if (statusFresh(car, now)) {
-      final what = car.outState == 'on' ? 'Прогрев запущен' : 'Прогрев выключен';
-      return '$what · SMS в ${_clock(car.outAt!)}';
+      if (_runningByStatus(car, now)) return 'Прогрев запущен · SMS в ${_clock(car.outAt!)}';
+      if (car.outState == 'on') return 'Прогрев завершён по таймеру';
+      return 'Прогрев выключен · SMS в ${_clock(car.outAt!)}';
     }
-    return 'Данные от ${_clock(car.outAt!)} устарели · обновите состояние';
+    return 'Данные от ${_dayClock(car.outAt!)} устарели · обновите состояние';
   }
   if (car.endMs != null && car.endMs! > nowMs) return 'Расчётный таймер · ответа модуля нет';
   return 'Готов к запуску';
