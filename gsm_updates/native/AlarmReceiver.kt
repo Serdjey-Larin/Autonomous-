@@ -69,9 +69,9 @@ object Alerts {
             .putExtra("car", row.getString("car")).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = PendingIntent.getActivity(c, 0, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val name = row.getString("name")
-        val title = if (row.optBoolean("daily")) "$name · пора прогреть" else "$name · прогрев окончен"
+        val title = if (row.optBoolean("daily")) "$name пора прогреть" else "$name готов к поездке"
         val text = if (row.optBoolean("daily")) "Откройте приложение и нажмите ЗАПУСК."
-            else "Время прогрева вышло. Откройте приложение, чтобы проверить состояние."
+            else "Прогрев по таймеру завершён."
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(c, channel) else Notification.Builder(c)
         val n = builder.setSmallIcon(R.drawable.notification_icon).setContentTitle(title).setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(tap)
