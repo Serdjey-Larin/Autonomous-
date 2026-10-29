@@ -28,9 +28,13 @@ void main() {
       expect(p.status!.leftMinutes, 7);
       expect(p.status!.battery, 12.4);
     });
-    test('OK and other replies', () {
+    test('OK, balance and other replies', () {
       expect(parseReply(' ok \n').kind, ReplyKind.ok);
-      expect(parseReply(balance).kind, ReplyKind.other);
+      final b = parseReply(balance);
+      expect(b.kind, ReplyKind.balance);
+      expect(b.balance, 13);
+      expect(parseReply('USSD: Balans -5,50 руб.').balance, -5.5);
+      expect(parseReply('Unknown command').kind, ReplyKind.other);
     });
     test('implausible STATUS is rejected', () {
       expect(parseReply('Heater: ON\nLeft: 50 min\nTime: 30 min').kind, ReplyKind.invalid);
@@ -115,6 +119,44 @@ void main() {
       expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'START отправлен · ждём ответ модуля');
       expect(statusLine(car, t0.add(const Duration(minutes: 20))), contains('Ответа на START нет'));
       expect(confirmedOn(car, t0.add(const Duration(minutes: 1))), isFalse);
+    });
+
+    test('OK auto-confirms the command whose SMS editor was opened', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30,
+          pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
+      expect(statusLine(car, t0.add(const Duration(seconds: 20))), 'Ждём ответ модуля на START');
+      final okAt = t0.add(const Duration(seconds: 40));
+      final r = applyReply(car, sms(1, '+79281050233', 'OK', okAt));
+      expect(r.timerChanged, isTrue);
+      expect(car.pendingCommand, isNull);
+      expect(car.ackCmd, 'START');
+      expect(car.endMs, okAt.millisecondsSinceEpoch + 30 * 60000, reason: 'countdown starts at the module reply');
+      expect(car.outState, isNull);
+      expect(statusLine(car, okAt.add(const Duration(minutes: 1))), contains('Модуль принял START'));
+    });
+
+    test('OK for STOP stops the countdown; late OK does not confirm', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyUserSent(car, 'START', t0);
+      car.pendingCommand = 'STOP';
+      car.pendingSince = t0.add(const Duration(minutes: 5)).millisecondsSinceEpoch;
+      applyReply(car, sms(1, '+79281050233', 'OK', t0.add(const Duration(minutes: 6))));
+      expect(car.endMs, isNull);
+      expect(car.ackCmd, 'STOP');
+      final late = VehicleConfig(id: 'b', deviceNumber: '+79281050234',
+          pendingCommand: 'START', pendingSince: t0.millisecondsSinceEpoch);
+      applyReply(late, sms(2, '+79281050234', 'OK', t0.add(const Duration(minutes: 30))));
+      expect(late.pendingCommand, 'START');
+      expect(late.endMs, isNull);
+      expect(statusLine(late, t0.add(const Duration(minutes: 31))), contains('подтвердите отправку вручную'));
+    });
+
+    test('balance reply is stored for the tile', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, sms(1, '+79281050233', balance, t0));
+      expect(car.balanceRub, 13);
+      expect(balanceSubtitle(car), startsWith('13 ₽ · '));
+      expect(VehicleConfig.fromJson(car.toJson()).balanceRub, 13);
     });
 
     test('state survives JSON round trip', () {

@@ -95,6 +95,21 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
       return ApplyResult(kind: ReplyKind.status,
           timerChanged: oldEnd != car.endMs || oldCycle != car.cycleMinutes);
     case ReplyKind.ok:
+      // Команда, для которой открывали редактор SMS и ещё не подтверждали:
+      // OK от этого модуля в пределах 15 минут подтверждает и отправку, и приём.
+      // Отсчёт START начинается с момента ответа модуля.
+      final pending = car.pendingCommand, pendingSince = car.pendingSince;
+      if (pending != null && pendingSince != null &&
+          at >= pendingSince - 60000 && at - pendingSince <= replyTimeout.inMilliseconds) {
+        car.pendingCommand = null;
+        car.pendingSince = null;
+        final changed = applyUserSent(car, pending, DateTime.fromMillisecondsSinceEpoch(at));
+        car.awaitCmd = null;
+        car.awaitSince = null;
+        car.ackCmd = pending;
+        car.ackAt = at;
+        return ApplyResult(kind: ReplyKind.ok, timerChanged: changed);
+      }
       final since = car.awaitSince;
       final expected = car.awaitCmd != null && since != null &&
           at >= since - 60000 && at - since <= replyTimeout.inMilliseconds;
@@ -105,6 +120,13 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
         car.awaitSince = null;
       }
       return const ApplyResult(kind: ReplyKind.ok, timerChanged: false);
+    case ReplyKind.balance:
+      if (car.balanceAt == null || at >= car.balanceAt!) {
+        car.balanceRub = parsed.balance;
+        car.balanceText = sms.body.trim();
+        car.balanceAt = at;
+      }
+      return const ApplyResult(kind: ReplyKind.balance, timerChanged: false);
     case ReplyKind.other:
     case ReplyKind.invalid:
       return ApplyResult(kind: parsed.kind, timerChanged: false);
@@ -171,6 +193,13 @@ bool confirmedOn(VehicleConfig car, DateTime now) =>
 /// Одна строка под циферблатом. Никогда не пишет «отопитель работает».
 String statusLine(VehicleConfig car, DateTime now) {
   final nowMs = now.millisecondsSinceEpoch;
+  final pending = car.pendingCommand;
+  if (pending != null && car.pendingSince != null) {
+    if (nowMs - car.pendingSince! <= replyTimeout.inMilliseconds) {
+      return 'Ждём ответ модуля на $pending';
+    }
+    return 'Ответа на $pending нет · подтвердите отправку вручную';
+  }
   final await_ = car.awaitCmd;
   if (await_ != null && car.awaitSince != null) {
     if (nowMs - car.awaitSince! <= replyTimeout.inMilliseconds) {
@@ -191,4 +220,16 @@ String statusLine(VehicleConfig car, DateTime now) {
     return 'Данные от ${_clock(car.outAt!)} устарели · запросите STATUS';
   }
   return 'Расчётный таймер · не подтверждает работу отопителя';
+}
+
+/// Подпись плитки «Баланс»: «13 ₽ · 29.10 11:34» или исходная подпись.
+String balanceSubtitle(VehicleConfig car) {
+  if (car.balanceAt == null) return 'SMS BALANCE';
+  final t = DateTime.fromMillisecondsSinceEpoch(car.balanceAt!);
+  String two(int v) => v.toString().padLeft(2, '0');
+  final when = '${two(t.day)}.${two(t.month)} ${two(t.hour)}:${two(t.minute)}';
+  final rub = car.balanceRub;
+  if (rub == null) return 'ответ от $when';
+  final amount = rub == rub.roundToDouble() ? rub.toStringAsFixed(0) : rub.toStringAsFixed(2).replaceAll('.', ',');
+  return '$amount ₽ · $when';
 }

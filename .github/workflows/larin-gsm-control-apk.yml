@@ -17,7 +17,7 @@ env:
   # Закреплённая версия Flutter: шаблон Android, compileSdk/targetSdk, AGP и Kotlin
   # меняются только при осознанной правке этой строки.
   FLUTTER_VERSION: '3.47.8'
-  # Ожидаемые разрешения в APK 1.5.0. Лишнее разрешение — предупреждение,
+  # Ожидаемые разрешения в APK 1.5.1. Лишнее разрешение — предупреждение,
   # «чувствительное» (SMS, звонки, контакты, местоположение) — ошибка сборки.
   EXPECTED_PERMISSIONS: >-
     android.permission.POST_NOTIFICATIONS
@@ -163,7 +163,7 @@ jobs:
             echo "::warning::Разрешения сверх ожидаемых:$EXTRA"
           fi
           if echo "$PERMS" | grep -Eq "$FORBIDDEN_PERMISSION_PATTERN"; then
-            echo "::error::В APK 1.5.0 попало чувствительное разрешение:"
+            echo "::error::В APK 1.5.1 попало чувствительное разрешение:"
             echo "$PERMS" | grep -E "$FORBIDDEN_PERMISSION_PATTERN"
             exit 1
           fi
@@ -171,7 +171,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LARIN-COLD-GSM-Control-v1.5.0-APK
+          name: LARIN-COLD-GSM-Control-v1.5.1-APK
           path: |
             larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
             apk-badging.txt

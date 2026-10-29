@@ -31,6 +31,9 @@ class VehicleConfig {
     this.awaitSince,
     this.ackCmd,
     this.ackAt,
+    this.balanceRub,
+    this.balanceText,
+    this.balanceAt,
   });
 
   String id;
@@ -64,6 +67,11 @@ class VehicleConfig {
   /// Команда, на которую модуль ответил OK (только если ожидалась одна).
   String? ackCmd;
   int? ackAt;
+
+  // --- Баланс SIM-карты модуля из ответа на BALANCE. ---
+  double? balanceRub;
+  String? balanceText;
+  int? balanceAt;
   int secondsLeft(DateTime now) => endMs == null ? 0 : ((endMs! - now.millisecondsSinceEpoch) / 1000).ceil().clamp(0, cycleMinutes * 60);
   Map<String, dynamic> toJson() => {'id': id, 'deviceNumber': deviceNumber, 'ownerNumber': ownerNumber,
     'vehicleName': vehicleName, 'durationMinutes': durationMinutes, 'ussdCode': ussdCode,
@@ -72,7 +80,8 @@ class VehicleConfig {
     'startMs': startMs, 'basis': basis, 'outState': outState, 'outAt': outAt,
     'battery': battery, 'leftMin': leftMin, 'timeMin': timeMin,
     'lastReply': lastReply, 'lastReplyAt': lastReplyAt, 'awaitCmd': awaitCmd,
-    'awaitSince': awaitSince, 'ackCmd': ackCmd, 'ackAt': ackAt};
+    'awaitSince': awaitSince, 'ackCmd': ackCmd, 'ackAt': ackAt,
+    'balanceRub': balanceRub, 'balanceText': balanceText, 'balanceAt': balanceAt};
   factory VehicleConfig.fromJson(Map<String, dynamic> j) => VehicleConfig(
     id: j['id'] as String, deviceNumber: j['deviceNumber'] as String? ?? '',
     ownerNumber: j['ownerNumber'] as String? ?? '', vehicleName: j['vehicleName'] as String? ?? 'Автомобиль',
@@ -86,7 +95,8 @@ class VehicleConfig {
     timeMin: j['timeMin'] as int?, lastReply: j['lastReply'] as String?,
     lastReplyAt: j['lastReplyAt'] as int?, awaitCmd: j['awaitCmd'] as String?,
     awaitSince: j['awaitSince'] as int?, ackCmd: j['ackCmd'] as String?,
-    ackAt: j['ackAt'] as int?);
+    ackAt: j['ackAt'] as int?, balanceRub: (j['balanceRub'] as num?)?.toDouble(),
+    balanceText: j['balanceText'] as String?, balanceAt: j['balanceAt'] as int?);
   String deviceNumber;
   String ownerNumber;
   String vehicleName;

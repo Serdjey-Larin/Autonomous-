@@ -202,7 +202,10 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     await _pushDevices();
     if (mounted) setState(() {});
   }
-  Future<void> _confirmPending() async {
+  /// Подтверждение отправки START/STOP/TIME. При включённом приёме ответов
+  /// команда подтверждается сама ответом OK модуля, и диалог открывается только
+  /// по кнопке «Подтвердить отправку SMS» (manual).
+  Future<void> _confirmPending({bool manual = false}) async {
     if (_confirming || _sending || !mounted) return;
     // Ожидание старше 2 часов — уже неактуально, не спрашиваем и не запускаем отсчёт.
     final staleBefore = DateTime.now().subtract(const Duration(hours: 2)).millisecondsSinceEpoch;
@@ -213,7 +216,10 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
       }
     }
     if (dropped) await _persist();
-    final pending = _cars.where((c) => c.pendingCommand != null).toList();
+    if (_smsGranted && !manual) return;
+    final pending = manual
+        ? _cars.where((c) => c.pendingCommand != null && c.id == _config.id).toList()
+        : _cars.where((c) => c.pendingCommand != null).toList();
     if (pending.isEmpty) return;
     _confirming = true;
     try {
@@ -547,7 +553,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
           config: _config,
           chooseCar: _chooseCar,
           openMessages: _openMessages,
-          confirmPending: _confirmPending,
+          confirmPending: () => _confirmPending(manual: true),
           reminder: _reminder,
           send: _send,
           call: _makeCall,
@@ -682,7 +688,7 @@ class _HomeView extends StatelessWidget {
               subtitle: 'SMS STATUS', onTap: () => send(GsmProtocol.status))),
           const SizedBox(width: 10),
           Expanded(child: _QuickAction(icon: Icons.account_balance_wallet_outlined,
-              title: 'Баланс', subtitle: 'SMS BALANCE', onTap: () => send(GsmProtocol.balance))),
+              title: 'Баланс', subtitle: balanceSubtitle(config), onTap: () => send(GsmProtocol.balance))),
         ]),
         const SizedBox(height: 10),
         OutlinedButton.icon(
@@ -815,7 +821,7 @@ class _SettingsView extends StatelessWidget {
       const SizedBox(height: 12),
       const _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LARIN COLD GSM · приложение 1.5.0',
+          Text('LARIN COLD GSM · приложение 1.5.1',
             style: TextStyle(fontWeight: FontWeight.w800, color: _navy)),
           SizedBox(height: 7),
           Text('Совместимо с LARIN COLD GSM START v1.5.5. '
