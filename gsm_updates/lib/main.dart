@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.7';
+const appVersion = '1.7.8';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -137,7 +137,6 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   bool _sending = false;
   bool _loading = true;
   int _page = 0;
-  bool _snowOn = false;
   final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
 
   @override
@@ -296,7 +295,6 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   Future<void> _load() async {
     try {
       final garage = await _service.loadGarage();
-      try { _snowOn = await _prefs.getBool('winterSnow') ?? true; } catch (_) { _snowOn = false; }
       try { themeMode.value = themeFromName(await _prefs.getString('themeMode')); } catch (_) {}
       try {
         _setupHintUntil = await _prefs.getInt('setupHintUntil') ?? 0;
@@ -312,10 +310,6 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     } catch (e) {
       if (mounted) { setState(() { _cars = [_config]; _loading = false; }); _notice('Ошибка загрузки: $e', error: true); }
     }
-  }
-  Future<void> _toggleSnow(bool value) async {
-    setState(() => _snowOn = value);
-    try { await _prefs.setBool('winterSnow', value); } catch (_) {}
   }
   Future<void> _setTheme(ThemeMode mode) async {
     themeMode.value = mode;
@@ -687,11 +681,11 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
         statusBarColor: Colors.transparent, systemNavigationBarColor: p.nav);
     if (_loading) {
       return AnnotatedRegion<SystemUiOverlayStyle>(value: overlay, child: Scaffold(
-        body: Center(child: Image.asset('assets/larin_cold_logo.png', width: 220,
-          errorBuilder: (context, error, stackTrace) => const SizedBox.shrink()))));
+        body: const Center(child: _Logo(width: 220, height: 139))));
     }
     final now = DateTime.now();
-    final snow = _snowOn && isWinterSeason(now) && !MediaQuery.of(context).disableAnimations;
+    // Снег у всех с 1 декабря по 31 января (кроме «уменьшить анимацию» в системе).
+    final snow = isWinterSeason(now) && !MediaQuery.of(context).disableAnimations;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
       child: Scaffold(
@@ -743,8 +737,6 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
                 openAppSettings: _openAppSettings,
                 autostartMaker: const ['xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus', 'vivo', 'huawei', 'honor']
                     .any((m) => _maker.contains(m)),
-                snowOn: _snowOn,
-                toggleSnow: _toggleSnow,
                 setTheme: _setTheme,
               ),
             ]),
@@ -912,6 +904,27 @@ class _HomeView extends StatelessWidget {
   }
 }
 
+/// Логотип. В тёмной теме — на светлой «наклейке»: полупрозрачные штрихи
+/// и белая обводка рисунка рассчитаны на светлый фон, на тёмном они мутнеют.
+class _Logo extends StatelessWidget {
+  const _Logo({required this.width, required this.height});
+  final double width, height;
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final img = Image.asset('assets/larin_cold_logo.png', width: width, height: height, fit: BoxFit.contain,
+      gaplessPlayback: true, semanticLabel: 'Larin Cold',
+      errorBuilder: (context, error, stackTrace) => SizedBox(width: width, height: height,
+        child: Center(child: Text('LARIN COLD', style: brandItalic(18, color: p.accent)))));
+    if (!p.dark) return img;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(color: Palette.light.canvas, borderRadius: BorderRadius.circular(18)),
+      child: img,
+    );
+  }
+}
+
 String _clock(int minutes) => '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
 
 class _Header extends StatelessWidget {
@@ -923,10 +936,7 @@ class _Header extends StatelessWidget {
     final p = Palette.of(context);
     final pillBg = p.dark ? p.card : Colors.white;
     return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-      Image.asset('assets/larin_cold_logo.png', width: 140, height: 88, fit: BoxFit.contain, gaplessPlayback: true,
-        semanticLabel: 'Larin Cold',
-        errorBuilder: (context, error, stackTrace) => SizedBox(width: 140, height: 88,
-          child: Center(child: Text('LARIN COLD', style: brandItalic(18, color: p.accent))))),
+      const _Logo(width: 140, height: 88),
       const SizedBox(width: 8),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         const StartBadge(),
@@ -948,18 +958,20 @@ class _Header extends StatelessWidget {
           ),
         ),
       ])),
-      Tooltip(
-        message: 'Позвонить на модуль',
-        child: Material(
-          color: pillBg,
-          shape: CircleBorder(side: BorderSide(color: p.lineSoft, width: 2)),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: call,
-            child: SizedBox(width: 46, height: 46, child: Icon(Icons.call_outlined, color: p.accent, size: 22)),
+      Semantics(button: true, label: 'Позвонить на модуль', child: InkWell(
+        onTap: call,
+        customBorder: const StadiumBorder(),
+        child: Padding(padding: const EdgeInsets.fromLTRB(4, 2, 4, 2), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(color: p.dark ? const Color(0xFF2A7BEA) : p.accent, shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: p.accent.withValues(alpha: p.dark ? .35 : .22), spreadRadius: 3)]),
+            child: const Icon(Icons.phone_in_talk_rounded, color: Colors.white, size: 23),
           ),
-        ),
-      ),
+          const SizedBox(height: 4),
+          Text('Звонок', style: brandText(11.5, color: p.accent)),
+        ])),
+      )),
     ]);
   }
 }
@@ -1182,8 +1194,6 @@ class _SettingsView extends StatelessWidget {
     required this.enableReplies,
     required this.openAppSettings,
     required this.autostartMaker,
-    required this.snowOn,
-    required this.toggleSnow,
     required this.setTheme,
     required this.phone,
     required this.setupAction,
@@ -1203,8 +1213,6 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function() configure;
   final Future<void> Function(String) manageNumber;
   final Future<void> Function() configureUssd;
-  final bool snowOn;
-  final Future<void> Function(bool) toggleSnow;
   final Future<void> Function(ThemeMode) setTheme;
 
   @override
@@ -1298,15 +1306,6 @@ class _SettingsView extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text('«Как в телефоне» — тема меняется вместе с системной.', style: small),
-          const SizedBox(height: 4),
-          Material(color: Colors.transparent, child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: snowOn,
-            onChanged: toggleSnow,
-            secondary: const SizedBox(width: 24, height: 24, child: Center(child: LogoSnowflake(size: 22))),
-            title: Text('Зимний снег', style: brandText(14, color: p.text)),
-            subtitle: Text('С 1 декабря по 30 января. Не показывается, если анимация отключена в системе.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
-          ))
         ]),
       ),
       const SizedBox(height: 14),

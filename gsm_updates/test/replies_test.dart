@@ -292,11 +292,12 @@ void main() {
       expect(replyOverdue(car, t0.add(const Duration(minutes: 14))), isFalse,
           reason: 'a call may have been cancelled in the dialer: no «module silent» alarm');
     });
-    test('winter snow season is 1 December – 30 January', () {
+    test('winter snow season is 1 December – 31 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
       expect(isWinterSeason(DateTime(2026, 12, 1)), isTrue);
       expect(isWinterSeason(DateTime(2027, 1, 30)), isTrue);
-      expect(isWinterSeason(DateTime(2027, 1, 31)), isFalse);
+      expect(isWinterSeason(DateTime(2027, 1, 31)), isTrue);
+      expect(isWinterSeason(DateTime(2027, 2, 1)), isFalse);
     });
   });
 

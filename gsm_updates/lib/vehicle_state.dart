@@ -387,8 +387,8 @@ bool replyOverdue(VehicleConfig car, DateTime now) {
   return false;
 }
 
-/// Зимний снег: с 1 декабря по 30 января включительно.
-bool isWinterSeason(DateTime d) => d.month == 12 || (d.month == 1 && d.day <= 30);
+/// Зимний снег: с 1 декабря по 31 января включительно.
+bool isWinterSeason(DateTime d) => d.month == 12 || d.month == 1;
 
 /// Подпись плитки «Баланс»: «13 ₽ · 29.10 11:34» или исходная подпись.
 String balanceSubtitle(VehicleConfig car) {
