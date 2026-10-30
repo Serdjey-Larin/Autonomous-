@@ -458,16 +458,15 @@ class StartBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Transform(
         transform: Matrix4.skewX(-0.21),
+        // Спокойная плашка: тонкая зелёная рамка без заливки и тени.
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
           decoration: BoxDecoration(
-            color: Brand.green,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [BoxShadow(color: Palette.of(context).greenShadow, offset: const Offset(0, 3))],
+            border: Border.all(color: Brand.green.withValues(alpha: .7), width: 1.5),
           ),
           child: Transform(
             transform: Matrix4.skewX(0.21),
-            child: Text('START', style: brandItalic(22, color: Colors.white, letterSpacing: 1)),
+            child: Text('START', style: brandItalic(14, color: Brand.green, letterSpacing: 2)),
           ),
         ),
       );

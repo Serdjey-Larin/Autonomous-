@@ -1,7 +1,7 @@
 name: larin_cold_gsm_control
 description: Larin Cold Start — телефонный пульт по SMS и звонку.
 publish_to: none
-version: 1.8.3+183
+version: 1.8.4+184
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
