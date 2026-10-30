@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.8.0';
+const appVersion = '1.8.1';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -1277,11 +1277,11 @@ class _SettingsView extends StatelessWidget {
             config.ussdCode.isEmpty ? 'Не указан' : config.ussdCode),
           _ActionRow(title: 'Установить USSD-код', description: 'Например, *100#',
             icon: Icons.edit_note, onTap: configureUssd),
-          _ActionRow(title: 'Узнать код модуля', description: 'BALCODE?',
+          _ActionRow(title: 'Узнать код модуля',
             icon: Icons.help_outline, onTap: () => send(GsmProtocol.balanceCodeQuery)),
-          _ActionRow(title: 'Проверить баланс', description: 'BALANCE',
+          _ActionRow(title: 'Проверить баланс',
             icon: Icons.account_balance_wallet_outlined, onTap: () => send(GsmProtocol.balance)),
-          _ActionRow(title: 'Удалить код из модуля', description: 'BALCODE:OFF',
+          _ActionRow(title: 'Удалить код из модуля',
             icon: Icons.delete_outline, onTap: () => send(GsmProtocol.balanceCodeOff)),
         ]),
       ),
