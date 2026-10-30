@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.8';
+const appVersion = '1.7.9';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -904,8 +904,7 @@ class _HomeView extends StatelessWidget {
   }
 }
 
-/// Логотип. В тёмной теме — на светлой «наклейке»: полупрозрачные штрихи
-/// и белая обводка рисунка рассчитаны на светлый фон, на тёмном они мутнеют.
+/// Логотип (одинаковый в светлой и тёмной теме).
 class _Logo extends StatelessWidget {
   const _Logo({required this.width, required this.height});
   final double width, height;
@@ -916,12 +915,7 @@ class _Logo extends StatelessWidget {
       gaplessPlayback: true, semanticLabel: 'Larin Cold',
       errorBuilder: (context, error, stackTrace) => SizedBox(width: width, height: height,
         child: Center(child: Text('LARIN COLD', style: brandItalic(18, color: p.accent)))));
-    if (!p.dark) return img;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      decoration: BoxDecoration(color: Palette.light.canvas, borderRadius: BorderRadius.circular(18)),
-      child: img,
-    );
+    return img;
   }
 }
 
