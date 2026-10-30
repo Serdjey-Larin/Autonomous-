@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.6';
+const appVersion = '1.7.7';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -127,6 +127,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   bool _syncAgain = false;
   bool _smsGranted = false;
   PhoneState _phone = const PhoneState();
+  final GlobalKey _setupKey = GlobalKey();
   int _setupHintUntil = 0;
   /// Сколько раз плашку настройки скрывали: первый раз — на 7 дней, потом — навсегда.
   int _setupHintDismissals = 0;
@@ -706,7 +707,13 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
                 setupHint: _cars.any((c) => c.deviceNumber.isNotEmpty) &&
                     setupHintWanted(_phone) && now.millisecondsSinceEpoch > _setupHintUntil
                     ? _setupHintText(_phone) : null,
-                openSetup: () async { setState(() => _page = 1); },
+                openSetup: () async {
+                  setState(() => _page = 1);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    final c = _setupKey.currentContext;
+                    if (c != null) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 350), curve: Curves.easeOutCubic);
+                  });
+                },
                 hideSetup: _hideSetupHint,
                 hideLabel: _setupHintDismissals >= 1 ? 'Больше не показывать' : 'Не сейчас',
                 chooseCar: _chooseCar,
@@ -732,6 +739,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
                 phone: _phone,
                 setupAction: _setupAction,
                 setupTest: _setupTest,
+                setupKey: _setupKey,
                 openAppSettings: _openAppSettings,
                 autostartMaker: const ['xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus', 'vivo', 'huawei', 'honor']
                     .any((m) => _maker.contains(m)),
@@ -1180,7 +1188,9 @@ class _SettingsView extends StatelessWidget {
     required this.phone,
     required this.setupAction,
     required this.setupTest,
+    required this.setupKey,
   });
+  final GlobalKey setupKey;
   final PhoneState phone;
   final Future<void> Function(SetupStep) setupAction;
   final Future<void> Function() setupTest;
@@ -1202,12 +1212,77 @@ class _SettingsView extends StatelessWidget {
     final p = Palette.of(context);
     final body = brandText(13, color: p.text, weight: FontWeight.w500, height: 1.35);
     final small = brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35);
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 26), children: [
+    // Column, а не ListView: все карточки построены, и «Настроить» на главном
+    // экране может прокрутить прямо к карточке ответов.
+    return SingleChildScrollView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 26),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 14),
         child: Text('Настройки', style: brandItalic(28, color: p.text)),
       ),
-      _PhoneSetupCard(phone: phone, action: setupAction, test: setupTest),
+      _SectionCard(title: 'Автомобиль и SIM-карта', icon: Icons.directions_car_outlined,
+        child: Column(children: [
+          _DetailLine('Автомобиль', config.vehicleName),
+          _DetailLine('SIM модуля', config.deviceNumber.isEmpty ? 'Не указан' : config.deviceNumber),
+          _DetailLine('Ваш номер', config.ownerNumber.isEmpty ? 'Не указан' : config.ownerNumber),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: configure,
+            icon: const Icon(Icons.edit_outlined), label: const Text('Изменить настройки'))),
+          TextButton(onPressed: chooseCar, child: const Text('Мои автомобили')),
+          TextButton(onPressed: deleteCar, child: const Text('Удалить этот автомобиль')),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      // Скрыто, когда модуль уже прислал STATUS: значит, номер зарегистрирован.
+      if (config.outAt == null) ...[
+        _SectionCard(title: 'Первый запуск', icon: Icons.person_add_alt_1_outlined,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('На новом модуле мастер регистрируется SMS с собственного номера '
+                'в течение 10 минут после включения.', style: body),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: GsmProtocol.validPhone(config.ownerNumber)
+                ? () => send(GsmProtocol.pairMaster(config.ownerNumber))
+                : configure,
+              icon: const Icon(Icons.sms_outlined),
+              label: const Text('Зарегистрировать мастер-номер'),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 14),
+      ],
+      _SectionCard(title: 'Разрешённые номера', icon: Icons.groups_outlined,
+        child: Column(children: [
+          _ActionRow(title: 'Список пользователей', description: 'ACCLIMLIST',
+            icon: Icons.list_alt, onTap: () => manageNumber('list')),
+          _ActionRow(title: 'Добавить номер', description: 'До трёх дополнительных',
+            icon: Icons.person_add_alt, onTap: () => manageNumber('add')),
+          _ActionRow(title: 'Удалить номер', description: 'По номеру телефона',
+            icon: Icons.person_remove_alt_1, onTap: () => manageNumber('remove')),
+          _ActionRow(title: 'Сменить мастера', description: 'Передать права новому номеру',
+            icon: Icons.admin_panel_settings_outlined, onTap: () => manageNumber('master')),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      _PhoneSetupCard(key: setupKey, phone: phone, config: config, action: setupAction, test: setupTest,
+        notificationSettings: notificationSettings),
+      const SizedBox(height: 14),
+      _SectionCard(title: 'Баланс SIM-карты', icon: Icons.wallet_outlined,
+        child: Column(children: [
+          _DetailLine('Последний баланс', config.balanceAt == null ? 'Не запрашивался'
+              : '${balanceAmount(config)} ${balanceDate(config)}'),
+          _DetailLine('Сохранённый в приложении USSD',
+            config.ussdCode.isEmpty ? 'Не указан' : config.ussdCode),
+          _ActionRow(title: 'Установить USSD-код', description: 'Например, *100#',
+            icon: Icons.edit_note, onTap: configureUssd),
+          _ActionRow(title: 'Узнать код модуля', description: 'BALCODE?',
+            icon: Icons.help_outline, onTap: () => send(GsmProtocol.balanceCodeQuery)),
+          _ActionRow(title: 'Проверить баланс', description: 'BALANCE',
+            icon: Icons.account_balance_wallet_outlined, onTap: () => send(GsmProtocol.balance)),
+          _ActionRow(title: 'Удалить код из модуля', description: 'BALCODE:OFF',
+            icon: Icons.delete_outline, onTap: () => send(GsmProtocol.balanceCodeOff)),
+        ]),
+      ),
       const SizedBox(height: 14),
       _SectionCard(title: 'Оформление', icon: Icons.dark_mode_outlined,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1235,87 +1310,6 @@ class _SettingsView extends StatelessWidget {
         ]),
       ),
       const SizedBox(height: 14),
-      _SectionCard(title: 'Автомобиль и SIM-карта', icon: Icons.directions_car_outlined,
-        child: Column(children: [
-          _DetailLine('Автомобиль', config.vehicleName),
-          _DetailLine('SIM модуля', config.deviceNumber.isEmpty ? 'Не указан' : config.deviceNumber),
-          _DetailLine('Ваш номер', config.ownerNumber.isEmpty ? 'Не указан' : config.ownerNumber),
-          const SizedBox(height: 10),
-          SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: configure,
-            icon: const Icon(Icons.edit_outlined), label: const Text('Изменить настройки'))),
-          TextButton(onPressed: chooseCar, child: const Text('Мои автомобили')),
-          TextButton(onPressed: deleteCar, child: const Text('Удалить этот автомобиль')),
-        ]),
-      ),
-      const SizedBox(height: 14),
-      _SectionCard(title: 'Ответы модуля и уведомления', icon: Icons.mark_chat_read_outlined,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(smsGranted
-              ? 'Приём включён: экран обновляется по ответам модуля, а когда приложение закрыто, '
-                'ответ приходит уведомлением от Larin Cold Start.'
-              : 'Выключено: приложение показывает только расчётный таймер.',
-            style: body),
-          if (config.lastReply != null && config.lastReplyAt != null) ...[
-            const SizedBox(height: 8),
-            Text('Последний ответ, ${_replyTime(config.lastReplyAt!)}:', style: small),
-            Text(config.lastReply!, style: brandText(12, color: p.text)),
-          ],
-          if (!smsGranted) ...[
-            const SizedBox(height: 10),
-            FilledButton.icon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
-              label: const Text('Включить приём ответов')),
-          ],
-          const SizedBox(height: 6),
-          _ActionRow(title: 'Уведомления', description: 'Разрешения, звук и точное время',
-            icon: Icons.notifications_active_outlined, onTap: notificationSettings),
-        ]),
-      ),
-      const SizedBox(height: 14),
-      _SectionCard(title: 'Первый запуск', icon: Icons.person_add_alt_1_outlined,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('На новом модуле мастер регистрируется SMS с собственного номера '
-              'в течение 10 минут после включения.', style: body),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: GsmProtocol.validPhone(config.ownerNumber)
-              ? () => send(GsmProtocol.pairMaster(config.ownerNumber))
-              : configure,
-            icon: const Icon(Icons.sms_outlined),
-            label: const Text('Зарегистрировать мастер-номер'),
-          ),
-        ]),
-      ),
-      const SizedBox(height: 14),
-      _SectionCard(title: 'Разрешённые номера', icon: Icons.groups_outlined,
-        child: Column(children: [
-          _ActionRow(title: 'Список пользователей', description: 'ACCLIMLIST',
-            icon: Icons.list_alt, onTap: () => manageNumber('list')),
-          _ActionRow(title: 'Добавить номер', description: 'До трёх дополнительных',
-            icon: Icons.person_add_alt, onTap: () => manageNumber('add')),
-          _ActionRow(title: 'Удалить номер', description: 'По номеру телефона',
-            icon: Icons.person_remove_alt_1, onTap: () => manageNumber('remove')),
-          _ActionRow(title: 'Сменить мастера', description: 'Передать права новому номеру',
-            icon: Icons.admin_panel_settings_outlined, onTap: () => manageNumber('master')),
-        ]),
-      ),
-      const SizedBox(height: 14),
-      _SectionCard(title: 'Баланс SIM-карты', icon: Icons.wallet_outlined,
-        child: Column(children: [
-          _DetailLine('Последний баланс', config.balanceAt == null ? 'Не запрашивался'
-              : '${balanceAmount(config)} ${balanceDate(config)}'),
-          _DetailLine('Сохранённый в приложении USSD',
-            config.ussdCode.isEmpty ? 'Не указан' : config.ussdCode),
-          _ActionRow(title: 'Установить USSD-код', description: 'Например, *100#',
-            icon: Icons.edit_note, onTap: configureUssd),
-          _ActionRow(title: 'Узнать код модуля', description: 'BALCODE?',
-            icon: Icons.help_outline, onTap: () => send(GsmProtocol.balanceCodeQuery)),
-          _ActionRow(title: 'Проверить баланс', description: 'BALANCE',
-            icon: Icons.account_balance_wallet_outlined, onTap: () => send(GsmProtocol.balance)),
-          _ActionRow(title: 'Удалить код из модуля', description: 'BALCODE:OFF',
-            icon: Icons.delete_outline, onTap: () => send(GsmProtocol.balanceCodeOff)),
-        ]),
-      ),
-      const SizedBox(height: 14),
       _SectionCard(title: 'Информация', icon: Icons.info_outline,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Larin Cold Start · приложение $appVersion', style: brandItalic(15, color: p.text, weight: FontWeight.w800)),
@@ -1335,7 +1329,7 @@ class _SettingsView extends StatelessWidget {
           Text('Шрифт Exo 2 — SIL Open Font License.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
         ]),
       ),
-    ]);
+    ]));
   }
 }
 
@@ -1511,12 +1505,15 @@ class _SetupHint extends StatelessWidget {
   }
 }
 
-/// Карточка «Ответы при закрытом приложении»: шаги для этого телефона.
+/// Карточка «Ответы модуля и уведомления»: шаги настройки для этого телефона,
+/// проверка, последний ответ модуля и звук/точное время уведомлений.
 class _PhoneSetupCard extends StatelessWidget {
-  const _PhoneSetupCard({required this.phone, required this.action, required this.test});
+  const _PhoneSetupCard({super.key, required this.phone, required this.config, required this.action,
+    required this.test, required this.notificationSettings});
   final PhoneState phone;
+  final VehicleConfig config;
   final Future<void> Function(SetupStep) action;
-  final Future<void> Function() test;
+  final Future<void> Function() test, notificationSettings;
   @override
   Widget build(BuildContext context) {
     final p = Palette.of(context);
@@ -1525,12 +1522,14 @@ class _PhoneSetupCard extends StatelessWidget {
     final complete = done == steps.length;
     final model = phone.model.isEmpty ? 'телефон' : phone.model;
     final v = vendorOf(phone);
-    return _SectionCard(title: 'Ответы при закрытом приложении', icon: Icons.phonelink_setup_outlined,
+    final muted = brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35);
+    final soft = p.dark ? p.canvas : const Color(0xFFF3F9FF);
+    return _SectionCard(title: 'Ответы модуля и уведомления', icon: Icons.mark_chat_read_outlined,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text.rich(TextSpan(style: brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35), children: [
-          const TextSpan(text: 'Ваш телефон: '),
+        Text.rich(TextSpan(style: muted, children: [
+          const TextSpan(text: 'Ответы модуля обновляют экран, а при закрытом приложении приходят уведомлением. '),
           TextSpan(text: v == Vendor.other ? model : '${vendorName(v)} $model', style: brandText(12, color: p.text)),
-          const TextSpan(text: '. Настройте один раз — уведомления от модуля будут приходить всегда.'),
+          TextSpan(text: complete ? ' настроен.' : ' — настройте один раз:'),
         ])),
         const SizedBox(height: 10),
         Row(children: [
@@ -1559,15 +1558,30 @@ class _PhoneSetupCard extends StatelessWidget {
         else
           Container(
             padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-            decoration: BoxDecoration(color: p.dark ? p.canvas : const Color(0xFFF3F9FF), borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: soft, borderRadius: BorderRadius.circular(14)),
             child: Row(children: [
-              Icon(Icons.mark_chat_read_outlined, color: p.accent, size: 21),
+              Icon(Icons.fact_check_outlined, color: p.accent, size: 21),
               const SizedBox(width: 8),
               Expanded(child: Text('Проверка: отправьте модулю STATUS и закройте приложение — придёт уведомление.',
-                style: brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35))),
+                style: muted)),
               TextButton(onPressed: test, child: const Text('Проверить')),
             ]),
           ),
+        if (config.lastReply != null && config.lastReplyAt != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+            decoration: BoxDecoration(color: soft, borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Последний ответ модуля · ${_replyTime(config.lastReplyAt!)}', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
+              const SizedBox(height: 4),
+              Text(config.lastReply!, style: brandText(12.5, color: p.text, height: 1.35)),
+            ]),
+          ),
+        ],
+        const SizedBox(height: 4),
+        _ActionRow(title: 'Звук и точное время', description: 'Для уведомлений «готов к поездке» и «пора прогреть»',
+          icon: Icons.alarm_outlined, onTap: notificationSettings),
       ]),
     );
   }
