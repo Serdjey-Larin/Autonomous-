@@ -342,6 +342,10 @@ object ReplyNotifier {
         val n = builder.setSmallIcon(R.drawable.notification_icon).setContentTitle(title).setContentText(line)
             .setStyle(Notification.BigTextStyle().bigText(line)).setAutoCancel(true).setContentIntent(tap)
             .setCategory(Notification.CATEGORY_STATUS).build()
-        try { nm.notify("reply_$id", 2, n) } catch (_: SecurityException) { }
+        try {
+            nm.notify("reply_$id", 2, n)
+            // Фоновый путь работает: приложение было закрыто, а SMS обработано и показано.
+            SmsInbox.prefs(c).edit().putLong("bgReplyAt", System.currentTimeMillis()).apply()
+        } catch (_: SecurityException) { }
     }
 }

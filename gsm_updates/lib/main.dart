@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'brand.dart';
 import 'device_service.dart';
+import 'phone_setup.dart';
 import 'protocol.dart';
 import 'reply_parser.dart';
 import 'sms_inbox.dart';
@@ -17,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.3';
+const appVersion = '1.7.4';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -125,6 +126,8 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   bool _syncing = false;
   bool _syncAgain = false;
   bool _smsGranted = false;
+  PhoneState _phone = const PhoneState();
+  int _setupHintUntil = 0;
   String _maker = '';
   Timer? _tick;
   bool _confirming = false;
@@ -169,8 +172,9 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   Future<void> _refreshSmsState() async {
     try {
       final st = await _sms.state();
+      _phone = st;
       _smsGranted = st.granted;
-      _maker = st.manufacturer;
+      _maker = '${st.manufacturer} ${st.brand}';
     } catch (_) {
       _smsGranted = false;
     }
@@ -233,30 +237,56 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
         await _syncInbox();
         return;
       }
+      await _refreshSmsState();
       if (!mounted) return;
-      final autostart = const ['xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus', 'vivo', 'huawei', 'honor']
-          .any((m) => _maker.contains(m));
-      final go = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-        title: const Text('Разрешите приём SMS'),
-        scrollable: true,
-        content: Text('Android ограничивает это разрешение для приложений, установленных не из магазина.\n\n'
-            '1. Откроются «Сведения о приложении».\n'
-            '2. Нажмите ⋮ вверху справа → «Разрешить ограниченные настройки» и подтвердите.\n'
-            '3. «Разрешения» → «SMS» → «Разрешить».'
-            '${autostart ? '\n4. Включите «Автозапуск» для Larin Cold Start, иначе ответы при закрытом приложении могут не приниматься.' : ''}'
-            '\n\nПриложение сохраняет только SMS с номеров модулей и никуда их не передаёт.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Открыть настройки'))]));
-      if (go == true) await _sms.appSettings();
+      final restricted = likelyRestricted(_phone);
+      final go = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, showDragHandle: true,
+        builder: (ctx) => _SmsPermissionSheet(restricted: restricted));
+      if (go == true) await _sms.open('app');
     } catch (e) {
       _notice('Не удалось запросить разрешение: $e', error: true);
     }
   }
+
+  /// Шаг настройки телефона: разрешение SMS запрашиваем сами, остальное — открываем экран системы.
+  Future<void> _setupAction(SetupStep step) async {
+    if (step.action == 'sms') { await _enableReplies(); return; }
+    try {
+      final special = await _sms.open(step.action);
+      if (!special && step.action != 'app' && step.action != 'notifications') {
+        _notice('Открыты «Сведения о приложении» — найдите там «${step.title}».');
+      }
+    } catch (e) { _notice('$e', error: true); }
+  }
+
+  /// Проверка фонового приёма: STATUS из SMS-приложения, затем закрыть приложение.
+  Future<void> _setupTest() async {
+    if (!await _ensureDevice()) return;
+    if (!mounted) return;
+    final go = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Проверка ответов'),
+      content: const Text('1. Нажмите «Отправить STATUS» и отправьте SMS.\n'
+          '2. Закройте Larin Cold Start: смахните его из списка недавних приложений.\n'
+          '3. Через полминуты должно прийти уведомление «… · прогрев выключен» или «… · прогрев запущен».\n\n'
+          'Пришло — всё настроено, шаги станут зелёными. Не пришло — проверьте жёлтые шаги.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Отправить STATUS'))]));
+    if (go == true) {
+      try { await _service.composeSms(_config.deviceNumber, GsmProtocol.status); } catch (e) { _notice('$e', error: true); }
+    }
+  }
+
+  Future<void> _hideSetupHint() async {
+    setState(() => _setupHintUntil = DateTime.now().add(const Duration(days: 7)).millisecondsSinceEpoch);
+    try { await _prefs.setInt('setupHintUntil', _setupHintUntil); } catch (_) {}
+  }
+
   Future<void> _load() async {
     try {
       final garage = await _service.loadGarage();
       try { _snowOn = await _prefs.getBool('winterSnow') ?? true; } catch (_) { _snowOn = false; }
       try { themeMode.value = themeFromName(await _prefs.getString('themeMode')); } catch (_) {}
+      try { _setupHintUntil = await _prefs.getInt('setupHintUntil') ?? 0; } catch (_) {}
       if (!mounted) return;
       setState(() {
         _cars = garage.cars;
@@ -659,6 +689,11 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
               _HomeView(
                 config: _config,
                 now: now,
+                setupHint: _cars.any((c) => c.deviceNumber.isNotEmpty) &&
+                    !setupComplete(setupSteps(_phone)) && now.millisecondsSinceEpoch > _setupHintUntil
+                    ? _setupHintText(_phone) : null,
+                openSetup: () async { setState(() => _page = 1); },
+                hideSetup: _hideSetupHint,
                 chooseCar: _chooseCar,
                 openMessages: _openMessages,
                 confirmPending: () => _confirmPending(manual: true),
@@ -679,6 +714,9 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
                 configureUssd: _configureUssd,
                 smsGranted: _smsGranted,
                 enableReplies: _enableReplies,
+                phone: _phone,
+                setupAction: _setupAction,
+                setupTest: _setupTest,
                 openAppSettings: _openAppSettings,
                 autostartMaker: const ['xiaomi', 'redmi', 'poco', 'realme', 'oppo', 'oneplus', 'vivo', 'huawei', 'honor']
                     .any((m) => _maker.contains(m)),
@@ -693,6 +731,14 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
       ),
     );
   }
+}
+
+String _setupHintText(PhoneState p) {
+  if (!p.granted) return 'Включите приём ответов модуля — приложение само покажет состояние, АКБ и таймер.';
+  final left = setupSteps(p).where((s) => s.status != StepStatus.done).length;
+  final v = vendorOf(p);
+  final where = v == Vendor.other ? 'На этом телефоне' : 'На ${vendorName(v)}';
+  return '$where ответы модуля могут не приходить, пока приложение закрыто. Осталось настроек: $left.';
 }
 
 class _BottomBar extends StatelessWidget {
@@ -731,6 +777,9 @@ class _HomeView extends StatelessWidget {
   const _HomeView({
     required this.config,
     required this.now,
+    required this.setupHint,
+    required this.openSetup,
+    required this.hideSetup,
     required this.chooseCar,
     required this.openMessages,
     required this.confirmPending,
@@ -742,6 +791,8 @@ class _HomeView extends StatelessWidget {
   });
   final VehicleConfig config;
   final DateTime now;
+  final String? setupHint;
+  final Future<void> Function() openSetup, hideSetup;
   final Future<void> Function() chooseCar, openMessages, reminder, confirmPending;
   final Future<void> Function(String) send;
   final Future<void> Function() call;
@@ -763,6 +814,10 @@ class _HomeView extends StatelessWidget {
             message: 'Сначала укажите номер SIM-карты модуля.',
             action: TextButton(onPressed: configure, child: const Text('Настроить')),
           ),
+        ],
+        if (configured && setupHint != null && !replyOverdue(config, now)) ...[
+          const SizedBox(height: 8),
+          _SetupHint(text: setupHint!, open: openSetup, hide: hideSetup),
         ],
         if (configured && replyOverdue(config, now)) ...[
           const SizedBox(height: 8),
@@ -1105,7 +1160,13 @@ class _SettingsView extends StatelessWidget {
     required this.snowOn,
     required this.toggleSnow,
     required this.setTheme,
+    required this.phone,
+    required this.setupAction,
+    required this.setupTest,
   });
+  final PhoneState phone;
+  final Future<void> Function(SetupStep) setupAction;
+  final Future<void> Function() setupTest;
   final bool smsGranted;
   final Future<void> Function() enableReplies, openAppSettings;
   final bool autostartMaker;
@@ -1129,6 +1190,8 @@ class _SettingsView extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 14),
         child: Text('Настройки', style: brandItalic(28, color: p.text)),
       ),
+      _PhoneSetupCard(phone: phone, action: setupAction, test: setupTest),
+      const SizedBox(height: 14),
       _SectionCard(title: 'Оформление', icon: Icons.dark_mode_outlined,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           ValueListenableBuilder<ThemeMode>(
@@ -1185,18 +1248,7 @@ class _SettingsView extends StatelessWidget {
             FilledButton.icon(onPressed: enableReplies, icon: const Icon(Icons.sms_outlined),
               label: const Text('Включить приём ответов')),
           ],
-          const SizedBox(height: 12),
-          Text('Советы', style: brandItalic(14, color: p.text, weight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text('• Звук в переписке с модулем в SMS-приложении можно выключить — '
-              'уведомления будут приходить от Larin Cold Start.', style: small),
-          Text('• В «Сведениях о приложении» выключите «Удалять разрешения, если приложение не используется», '
-              'иначе Android может отключить приём ответов.', style: small),
-          if (autostartMaker)
-            Text('• На вашем телефоне включите для Larin Cold Start «Автозапуск».', style: small),
           const SizedBox(height: 6),
-          Align(alignment: Alignment.centerLeft,
-            child: TextButton(onPressed: openAppSettings, child: const Text('Открыть сведения о приложении'))),
           _ActionRow(title: 'Уведомления', description: 'Разрешения, звук и точное время',
             icon: Icons.notifications_active_outlined, onTap: notificationSettings),
         ]),
@@ -1409,6 +1461,185 @@ class _ActionRow extends StatelessWidget {
       subtitle: Text(description, style: brandText(11, color: p.muted, weight: FontWeight.w500)),
       trailing: Icon(Icons.chevron_right_rounded, color: p.muted),
       onTap: onTap,
+    ));
+  }
+}
+
+
+/// Плашка на главном экране: настройка телефона не закончена.
+class _SetupHint extends StatelessWidget {
+  const _SetupHint({required this.text, required this.open, required this.hide});
+  final String text;
+  final Future<void> Function() open, hide;
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 10, 8, 6),
+      decoration: BoxDecoration(color: p.warnBg, borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: p.warnRing, spreadRadius: 1)]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.phonelink_setup_outlined, color: p.warnText, size: 20),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: brandText(13, color: p.warnText, height: 1.35))),
+        ]),
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          TextButton(onPressed: hide, child: Text('Не сейчас', style: brandText(13, color: p.warnText))),
+          const SizedBox(width: 4),
+          FilledButton(onPressed: open, child: const Text('Настроить')),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// Карточка «Ответы при закрытом приложении»: шаги для этого телефона.
+class _PhoneSetupCard extends StatelessWidget {
+  const _PhoneSetupCard({required this.phone, required this.action, required this.test});
+  final PhoneState phone;
+  final Future<void> Function(SetupStep) action;
+  final Future<void> Function() test;
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final steps = setupSteps(phone);
+    final done = stepsDone(steps);
+    final complete = done == steps.length;
+    final model = phone.model.isEmpty ? 'телефон' : phone.model;
+    final v = vendorOf(phone);
+    return _SectionCard(title: 'Ответы при закрытом приложении', icon: Icons.phonelink_setup_outlined,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text.rich(TextSpan(style: brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35), children: [
+          const TextSpan(text: 'Ваш телефон: '),
+          TextSpan(text: v == Vendor.other ? model : '${vendorName(v)} $model', style: brandText(12, color: p.text)),
+          const TextSpan(text: '. Настройте один раз — уведомления от модуля будут приходить всегда.'),
+        ])),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(
+            value: steps.isEmpty ? 0 : done / steps.length, minHeight: 8,
+            backgroundColor: p.track, color: Brand.green))),
+          const SizedBox(width: 10),
+          Text('$done из ${steps.length}', style: brandItalic(13, color: complete ? p.onText : p.accent)),
+        ]),
+        const SizedBox(height: 4),
+        for (final s in steps) _SetupStepRow(step: s, action: action),
+        const SizedBox(height: 8),
+        if (complete)
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: p.onBg, borderRadius: BorderRadius.circular(14),
+              boxShadow: [BoxShadow(color: p.onRing, spreadRadius: 1)]),
+            child: Row(children: [
+              const LogoSnowflake(size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Text(phone.bgReplyAt > 0
+                  ? 'Всё настроено. Уведомление при закрытом приложении пришло ${_replyTime(phone.bgReplyAt)}.'
+                  : 'Всё настроено.', style: brandText(13, color: p.onText, height: 1.35))),
+            ]),
+          )
+        else
+          Container(
+            padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+            decoration: BoxDecoration(color: p.dark ? p.canvas : const Color(0xFFF3F9FF), borderRadius: BorderRadius.circular(14)),
+            child: Row(children: [
+              Icon(Icons.mark_chat_read_outlined, color: p.accent, size: 21),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Проверка: отправьте модулю STATUS и закройте приложение — придёт уведомление.',
+                style: brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35))),
+              TextButton(onPressed: test, child: const Text('Проверить')),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
+
+class _SetupStepRow extends StatelessWidget {
+  const _SetupStepRow({required this.step, required this.action});
+  final SetupStep step;
+  final Future<void> Function(SetupStep) action;
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final done = step.status == StepStatus.done;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: p.line.withValues(alpha: .6)))),
+      child: Row(children: [
+        done
+            ? const Icon(Icons.check_circle, color: Brand.green, size: 26)
+            : Icon(Icons.error_outline, color: p.warnDot, size: 26),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(step.title, style: brandText(14, color: done ? p.muted : p.text)),
+          Text(step.subtitle, style: brandText(11.5, color: p.muted, weight: FontWeight.w500, height: 1.3)),
+        ])),
+        if (!done || step.action != 'sms') ...[
+          const SizedBox(width: 8),
+          done
+              ? IconButton(onPressed: () => action(step), tooltip: 'Открыть', icon: Icon(Icons.chevron_right_rounded, color: p.muted))
+              : FilledButton(onPressed: () => action(step),
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 14)),
+                  child: Text(step.action == 'sms' ? 'Разрешить' : 'Открыть')),
+        ],
+      ]),
+    );
+  }
+}
+
+/// Окно, если разрешение SMS не выдано. При установке из файла на Android 13+
+/// объясняет «ограниченные настройки» (кнопка «Разрешить» серая).
+class _SmsPermissionSheet extends StatelessWidget {
+  const _SmsPermissionSheet({required this.restricted});
+  final bool restricted;
+  @override
+  Widget build(BuildContext context) {
+    final p = Palette.of(context);
+    final steps = restricted
+        ? const ['Нажмите «Открыть сведения» ниже',
+            'Вверху справа ⋮ → «Разрешить ограниченные настройки»',
+            '«Разрешения» → «SMS» → «Разрешить»']
+        : const ['Нажмите «Открыть сведения» ниже', '«Разрешения» → «SMS» → «Разрешить»'];
+    Widget num(int n) => Transform(
+          transform: Matrix4.skewX(-0.17),
+          child: Container(width: 28, height: 28, alignment: Alignment.center,
+            decoration: BoxDecoration(color: p.chipOn, borderRadius: BorderRadius.circular(9)),
+            child: Text('$n', style: brandItalic(15, color: Colors.white))));
+    return SafeArea(child: Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(restricted ? 'Кнопка «Разрешить» серая?' : 'Разрешите приём SMS', style: brandItalic(21, color: p.text)),
+        const SizedBox(height: 8),
+        Text(restricted
+            ? 'Android 13 и новее так защищает приложения, установленные из файла. Это займёт 30 секунд:'
+            : 'Приложению нужно разрешение, чтобы показывать ответы модуля:',
+          style: brandText(13, color: p.muted, weight: FontWeight.w500, height: 1.4)),
+        const SizedBox(height: 12),
+        for (var i = 0; i < steps.length; i++) Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            num(i + 1), const SizedBox(width: 12),
+            Expanded(child: Text(steps[i], style: brandText(14, color: p.text, height: 1.35))),
+          ]),
+        ),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: p.dark ? p.canvas : const Color(0xFFF3F9FF), borderRadius: BorderRadius.circular(14)),
+          child: Text('Приложение принимает только SMS с номера вашего модуля и никуда их не передаёт. '
+              'Без разрешения оно тоже работает, но показывает только расчётный таймер.',
+            style: brandText(12, color: p.muted, weight: FontWeight.w500, height: 1.35)),
+        ),
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context, false),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: const Text('Позже'))),
+          const SizedBox(width: 10),
+          Expanded(flex: 3, child: FilledButton(onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: const Text('Открыть сведения'))),
+        ]),
+      ]),
     ));
   }
 }

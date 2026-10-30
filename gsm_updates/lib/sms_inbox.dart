@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 
+import 'phone_setup.dart';
 import 'vehicle_state.dart';
 
 /// Мост к нативному журналу входящих SMS от модулей (SmsInbox в Kotlin).
@@ -36,11 +37,13 @@ class SmsInboxBridge {
 
   Future<void> ack(int seq) => channel.invokeMethod<void>('ack', {'seq': seq});
 
-  /// granted, manufacturer (в нижнем регистре), sdk.
-  Future<({bool granted, String manufacturer})> state() async {
-    final m = await channel.invokeMethod<Map<Object?, Object?>>('state') ?? const {};
-    return (granted: m['granted'] == true, manufacturer: (m['manufacturer'] as String?) ?? '');
-  }
+  /// Разрешение SMS, производитель, модель, уведомления, батарея, установщик.
+  Future<PhoneState> state() async =>
+      PhoneState.fromMap(await channel.invokeMethod<Map<Object?, Object?>>('state') ?? const {});
+
+  /// Открыть экран системы: 'app', 'notifications', 'battery', 'autostart', 'miuiActivity'.
+  /// false — специальный экран не нашёлся, открыты «Сведения о приложении».
+  Future<bool> open(String kind) async => await channel.invokeMethod<bool>('open', {'kind': kind}) ?? false;
 
   Future<bool> request() async => await channel.invokeMethod<bool>('request') ?? false;
   Future<void> appSettings() => channel.invokeMethod<void>('appSettings');

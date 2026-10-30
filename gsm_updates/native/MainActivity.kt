@@ -1,12 +1,15 @@
 package ru.larincold.larin_cold_gsm_control
 import android.Manifest
 import android.app.NotificationManager
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -66,7 +69,14 @@ class MainActivity : FlutterActivity() {
                     "state" -> result.success(mapOf(
                         "granted" to smsAllowed(),
                         "manufacturer" to Build.MANUFACTURER.lowercase(),
-                        "sdk" to Build.VERSION.SDK_INT))
+                        "brand" to Build.BRAND.lowercase(),
+                        "model" to Build.MODEL,
+                        "sdk" to Build.VERSION.SDK_INT,
+                        "notifications" to allowed(),
+                        "battery" to batteryUnrestricted(),
+                        "installer" to (installerPackage() ?: ""),
+                        "bgReplyAt" to SmsInbox.prefs(this).getLong("bgReplyAt", 0L)))
+                    "open" -> result.success(PhoneScreens.open(this, call.argument<String>("kind") ?: "app"))
                     "request" -> {
                         if (smsAllowed()) result.success(true)
                         else if (smsPending != null) result.success(false)
@@ -86,6 +96,15 @@ class MainActivity : FlutterActivity() {
         if(requestCode==149){pending?.success(allowed());pending=null}
         if(requestCode==150){smsPending?.success(smsAllowed());smsPending=null}
     }
+    private fun batteryUnrestricted(): Boolean =
+        (getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+
+    /** Кто установил приложение: магазин (RuStore и т. п.) или системный установщик из файла. */
+    private fun installerPackage(): String? = try {
+        if (Build.VERSION.SDK_INT >= 30) packageManager.getInstallSourceInfo(packageName).installingPackageName
+        else packageManager.getInstallerPackageName(packageName)
+    } catch (_: Exception) { null }
+
     override fun onResume() { super.onResume(); SmsInbox.foreground = true }
     override fun onPause() { SmsInbox.foreground = false; super.onPause() }
     override fun onDestroy(){
@@ -93,5 +112,54 @@ class MainActivity : FlutterActivity() {
         smsPending?.success(false);smsPending=null
         SmsInbox.listener = null; smsChannel = null
         super.onDestroy()
+    }
+}
+
+/**
+ * Экраны системы и оболочек производителей, куда приложение ведёт пользователя
+ * при настройке. Каждый вариант пробуется по очереди; если ни один не открылся —
+ * «Сведения о приложении» (там есть всё, просто глубже).
+ */
+object PhoneScreens {
+    private fun details(c: Context) = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}"))
+
+    private fun tryStart(c: Context, intents: List<Intent>): Boolean {
+        for (i in intents) {
+            try {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                c.startActivity(i)
+                return true
+            } catch (_: Exception) { }
+        }
+        return false
+    }
+
+    private fun comp(pkg: String, cls: String) = Intent().setComponent(ComponentName(pkg, cls))
+
+    /** true — открыт специальный экран; false — открыты «Сведения о приложении». */
+    fun open(c: Context, kind: String): Boolean {
+        val pkg = c.packageName
+        val list: List<Intent> = when (kind) {
+            "notifications" -> listOf(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg))
+            "battery" -> listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            "miuiActivity" -> listOf(
+                comp("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
+                    .putExtra("package_name", pkg).putExtra("package_label", "Larin Cold Start"))
+            "autostart" -> listOf(
+                comp("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+                comp("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+                comp("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"),
+                comp("com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+                comp("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+                comp("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+                comp("com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity"),
+                comp("com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"),
+                comp("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+                comp("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"))
+            else -> emptyList()
+        }
+        if (tryStart(c, list)) return true
+        tryStart(c, listOf(details(c)))
+        return false
     }
 }
