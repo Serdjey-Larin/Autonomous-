@@ -40,6 +40,8 @@ class VehicleConfig {
     this.cmdAt,
     this.errorText,
     this.errorAt,
+    this.moduleUssd,
+    this.moduleUssdAt,
   });
 
   String id;
@@ -97,6 +99,10 @@ class VehicleConfig {
   String? errorText;
   int? errorAt;
 
+  /// USSD-код, записанный в модуле (ответ на BALCODE?): '' — не задан, null — не спрашивали.
+  String? moduleUssd;
+  int? moduleUssdAt;
+
   /// Номер модуля сменился: всё, что пришло от прежнего модуля, забываем.
   void forgetModuleData() {
     endMs = null; startMs = null; basis = null;
@@ -106,6 +112,7 @@ class VehicleConfig {
     awaitCmd = null; awaitSince = null; ackCmd = null; ackAt = null;
     balanceRub = null; balanceText = null; balanceAt = null;
     callAt = null; outAlready = false; outIgnored = false; cmdAt = null; errorText = null; errorAt = null;
+    moduleUssd = null; moduleUssdAt = null;
   }
   int secondsLeft(DateTime now) => endMs == null ? 0 : ((endMs! - now.millisecondsSinceEpoch) / 1000).ceil().clamp(0, cycleMinutes * 60);
   Map<String, dynamic> toJson() => {'id': id, 'deviceNumber': deviceNumber, 'ownerNumber': ownerNumber,
@@ -117,7 +124,8 @@ class VehicleConfig {
     'lastReply': lastReply, 'lastReplyAt': lastReplyAt, 'awaitCmd': awaitCmd,
     'awaitSince': awaitSince, 'ackCmd': ackCmd, 'ackAt': ackAt,
     'balanceRub': balanceRub, 'balanceText': balanceText, 'balanceAt': balanceAt, 'callAt': callAt,
-    'outAlready': outAlready, 'outIgnored': outIgnored, 'cmdAt': cmdAt, 'errorText': errorText, 'errorAt': errorAt};
+    'outAlready': outAlready, 'outIgnored': outIgnored, 'cmdAt': cmdAt, 'errorText': errorText, 'errorAt': errorAt,
+    'moduleUssd': moduleUssd, 'moduleUssdAt': moduleUssdAt};
   factory VehicleConfig.fromJson(Map<String, dynamic> j) => VehicleConfig(
     id: j['id'] as String, deviceNumber: j['deviceNumber'] as String? ?? '',
     ownerNumber: j['ownerNumber'] as String? ?? '', vehicleName: j['vehicleName'] as String? ?? 'Автомобиль',
@@ -134,7 +142,8 @@ class VehicleConfig {
     ackAt: j['ackAt'] as int?, balanceRub: (j['balanceRub'] as num?)?.toDouble(),
     balanceText: j['balanceText'] as String?, balanceAt: j['balanceAt'] as int?, callAt: j['callAt'] as int?,
     outAlready: j['outAlready'] == true, outIgnored: j['outIgnored'] == true, cmdAt: j['cmdAt'] as int?,
-    errorText: j['errorText'] as String?, errorAt: j['errorAt'] as int?);
+    errorText: j['errorText'] as String?, errorAt: j['errorAt'] as int?,
+    moduleUssd: j['moduleUssd'] as String?, moduleUssdAt: j['moduleUssdAt'] as int?);
   String deviceNumber;
   String ownerNumber;
   String vehicleName;

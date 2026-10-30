@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.8.1';
+const appVersion = '1.8.2';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -1275,6 +1275,8 @@ class _SettingsView extends StatelessWidget {
               : '${balanceAmount(config)} ${balanceDate(config)}'),
           _DetailLine('Сохранённый в приложении USSD',
             config.ussdCode.isEmpty ? 'Не указан' : config.ussdCode),
+          if (config.moduleUssd != null)
+            _DetailLine('Код в модуле', config.moduleUssd!.isEmpty ? 'Не задан' : config.moduleUssd!),
           _ActionRow(title: 'Установить USSD-код', description: 'Например, *100#',
             icon: Icons.edit_note, onTap: configureUssd),
           _ActionRow(title: 'Узнать код модуля',

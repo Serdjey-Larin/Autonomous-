@@ -74,6 +74,16 @@ String? moduleErrorText(String body) {
   return null;
 }
 
+final _balCode = RegExp(r'^\s*BALCODE\s*:\s*(.*)$', caseSensitive: false);
+
+/// Ответ на BALCODE?: «BALCODE: *100#» → '*100#', «BALCODE: NOT SET» → ''; иначе null.
+String? balanceCodeReply(String body) {
+  final m = _balCode.firstMatch(body.replaceAll('\r', '').trim());
+  if (m == null) return null;
+  final code = m.group(1)!.trim();
+  return code.toUpperCase() == 'NOT SET' ? '' : code;
+}
+
 ParsedReply parseReply(String body) {
   final text = body.replaceAll('\r', '').trim();
   if (text.toUpperCase() == 'OK') return const ParsedReply(ReplyKind.ok);

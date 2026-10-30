@@ -173,7 +173,7 @@ class SmsReceiver : BroadcastReceiver() {
         if (!stored) return
         SmsInbox.listener?.invoke()
         // Список номеров (ответ на ACCLIMLIST) показываем уведомлением всегда — и при открытом приложении.
-        if (!SmsInbox.foreground || ReplyNotifier.isUserList(body)) {
+        if (!SmsInbox.foreground || ReplyNotifier.isUserList(body) || ReplyNotifier.isBalCode(body)) {
             try { ReplyNotifier.handle(context, SmsInbox.normalize(sender), body,
                 parts.first().timestampMillis, System.currentTimeMillis()) } catch (_: Exception) { }
         }
@@ -226,6 +226,8 @@ object ReplyNotifier {
 
     private val userList = Regex("""^\s*MASTER\s*:""", RegexOption.IGNORE_CASE)
     fun isUserList(body: String) = userList.containsMatchIn(body)
+    private val balCode = Regex("""^\s*BALCODE\s*:\s*(.*)$""", RegexOption.IGNORE_CASE)
+    fun isBalCode(body: String) = balCode.containsMatchIn(body.trim())
 
     /** «MASTER: +7…\nEXTRA 1: +7…» → «Мастер: +7…\nДоп. 1: +7…». */
     private fun userListText(body: String): String = body.trim().lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n") { row ->
@@ -274,7 +276,17 @@ object ReplyNotifier {
         val validStatus = h != null && l != null && cycle != null && cycle in 1..240 &&
             (vNum == null || vNum in 5.0..18.0) && !(h.groupValues[1].equals("on", true) && l > cycle)
         val list = isUserList(text)
-        if (list) {
+        val codeMatch = balCode.find(text)
+        if (codeMatch != null) {
+            val code = codeMatch.groupValues[1].trim()
+            if (code.isEmpty() || code.equals("NOT SET", true)) {
+                title = "$name · код баланса не задан"
+                line = "Задайте USSD-код в настройках: «Баланс SIM-карты» → «Установить USSD-код»."
+            } else {
+                title = "$name · код баланса $code"
+                line = "Этот код модуль набирает по команде «Проверить баланс»."
+            }
+        } else if (list) {
             title = "$name · разрешённые номера"
             line = userListText(text)
         } else if (validStatus) {
@@ -361,7 +373,7 @@ object ReplyNotifier {
             .setStyle(Notification.BigTextStyle().bigText(line)).setAutoCancel(true).setContentIntent(tap)
             .setCategory(Notification.CATEGORY_STATUS).build()
         try {
-            nm.notify(if (list) "list_$id" else "reply_$id", 2, n)
+            nm.notify(when { list -> "list_$id"; codeMatch != null -> "code_$id"; else -> "reply_$id" }, 2, n)
             // Фоновый путь работает: приложение было закрыто, а SMS обработано и показано.
             if (!SmsInbox.foreground) SmsInbox.prefs(c).edit().putLong("bgReplyAt", System.currentTimeMillis()).apply()
         } catch (_: SecurityException) { }

@@ -413,4 +413,16 @@ void main() {
       expect(VehicleConfig.fromJson(car.toJson()).outIgnored, isTrue);
     });
   });
+  group('1.8.2 balance code reply', () {
+    test('BALCODE reply is parsed and stored', () {
+      expect(balanceCodeReply('BALCODE: *100#'), '*100#');
+      expect(balanceCodeReply('BALCODE: NOT SET'), '');
+      expect(balanceCodeReply('Heater: OFF'), isNull);
+      final car = VehicleConfig(deviceNumber: '+79990000000');
+      final t = DateTime(2026, 10, 30, 11).millisecondsSinceEpoch;
+      applyReply(car, InboundSms(seq: 1, number: '+79990000000', body: 'BALCODE: *102#', receivedMs: t, smscMs: t));
+      expect(car.moduleUssd, '*102#');
+      expect(VehicleConfig.fromJson(car.toJson()).moduleUssd, '*102#');
+    });
+  });
 }

@@ -172,6 +172,12 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
       }
       return const ApplyResult(kind: ReplyKind.balance, timerChanged: false);
     case ReplyKind.other:
+      final code = balanceCodeReply(sms.body);
+      if (code != null && (car.moduleUssdAt == null || at >= car.moduleUssdAt!)) {
+        car.moduleUssd = code;
+        car.moduleUssdAt = at;
+      }
+      return ApplyResult(kind: parsed.kind, timerChanged: false);
     case ReplyKind.invalid:
       return ApplyResult(kind: parsed.kind, timerChanged: false);
   }
