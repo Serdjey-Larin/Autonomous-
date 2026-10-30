@@ -77,6 +77,15 @@ class MainActivity : FlutterActivity() {
                         "installer" to (installerPackage() ?: ""),
                         "bgReplyAt" to SmsInbox.prefs(this).getLong("bgReplyAt", 0L)))
                     "open" -> result.success(PhoneScreens.open(this, call.argument<String>("kind") ?: "app"))
+                    "compose" -> {
+                        // Обычный startActivity (не ForResult): иначе Samsung «Сообщения» отвечают
+                        // «Не удаётся начать разговор» и оставляют поверх приложения пустое окно.
+                        val body = call.argument<String>("body") ?: ""
+                        val i = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + (call.argument<String>("number") ?: "")))
+                            .putExtra("sms_body", body)
+                            .putExtra(Intent.EXTRA_TEXT, body)
+                        result.success(try { startActivity(i); true } catch (e: Exception) { false })
+                    }
                     "request" -> {
                         if (smsAllowed()) result.success(true)
                         else if (smsPending != null) result.success(false)

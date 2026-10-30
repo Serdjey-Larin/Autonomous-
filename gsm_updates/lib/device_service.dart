@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:flutter_sms/flutter_sms.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -181,25 +181,26 @@ class DeviceService {
     }
   }
 
-  /// Нативный редактор SMS на Android/iOS. ПОЛЬЗОВАТЕЛЬ сам нажимает Отправить.
-  /// Возвращаемое значение плагина не подтверждает ни доставку, ни запуск отопителя.
+  static const _smsChannel = MethodChannel('ru.larincold/sms');
+
+  /// Открывает SMS-приложение с готовым текстом. ПОЛЬЗОВАТЕЛЬ сам нажимает «Отправить».
+  /// Обычный startActivity, без ожидания результата: Samsung/Google «Сообщения»,
+  /// запущенные «за результатом», показывали «Не удаётся начать разговор»
+  /// и оставляли поверх приложения невидимое окно — экран «зависал».
+  /// true — редактор открыт (это не подтверждает ни отправку, ни запуск отопителя).
   Future<bool> composeSms(String deviceNumber, String text) async {
     final normalized = GsmProtocol.normalizePhone(deviceNumber);
     if (!GsmProtocol.validPhone(normalized)) {
       throw const FormatException('Сначала укажи номер SIM-карты модуля (+7…)');
     }
     try {
-      final result = await sendSMS(message: text, recipients: <String>[normalized]);
-      final normalizedResult = result.toLowerCase();
-      // На разных платформах результат называется по-разному. Отмена НЕ
-      // должна повторно открывать окно SMS и не должна считаться отправкой.
-      if (normalizedResult.contains('cancel')) return false;
-      return true;
-    } catch (e) {
-      final reason = e.toString().toLowerCase();
-      if (reason.contains('cancel')) return false;
-      throw StateError('Не удалось открыть редактор SMS: $e');
-    }
+      if (await _smsChannel.invokeMethod<bool>('compose', {'number': normalized, 'body': text}) == true) return true;
+    } on PlatformException catch (_) {
+      // ниже — запасной путь через ссылку sms:
+    } on MissingPluginException catch (_) {}
+    final uri = Uri.parse('sms:$normalized?body=${Uri.encodeComponent(text)}');
+    if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return true;
+    throw StateError('Не удалось открыть SMS-приложение');
   }
 
   /// Звонок — только ПЕРЕКЛЮЧЕНИЕ, а не однозначный запуск/остановка.

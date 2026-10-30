@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.5';
+const appVersion = '1.7.6';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
