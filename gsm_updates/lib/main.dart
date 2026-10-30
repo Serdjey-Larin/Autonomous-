@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.8.2';
+const appVersion = '1.8.3';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -866,10 +866,12 @@ class _HomeView extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(child: _Tile(label: 'БАЛАНС', value: balanceAmount(config), sub: balanceDate(config),
             warm: balanceLow(config), onTap: () => send(GsmProtocol.balance))),
-          const SizedBox(width: 10),
-          Expanded(child: _Tile(label: 'РАБОТА', value: '${config.durationMinutes} мин', sub: 'время прогрева')),
         ])),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.only(left: 2, bottom: 8),
+          child: Text('ВРЕМЯ ПРОГРЕВА', style: brandItalic(12, color: p.muted, weight: FontWeight.w800)),
+        ),
         Wrap(spacing: 8, runSpacing: 8, children: [
           for (final minutes in const [15, 30, 45, 60, 90, 120])
             SkewChip(
@@ -879,7 +881,7 @@ class _HomeView extends StatelessWidget {
             ),
         ]),
         const SizedBox(height: 6),
-        Text('Выбор времени откроет SMS TIME:… для подтверждения.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
+        Text('Выбор времени откроет SMS для подтверждения.', style: brandText(11, color: p.muted, weight: FontWeight.w500)),
         const SizedBox(height: 12),
         IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: _SoftButton(

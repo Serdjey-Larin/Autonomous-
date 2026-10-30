@@ -1,5 +1,5 @@
 name: LARIN COLD GSM Control — APK из ZIP
-# rev 1.8.2
+# rev 1.8.3
 # Подпись: секреты LARIN_KEYSTORE_BASE64, LARIN_KEYSTORE_PASSWORD, LARIN_KEY_ALIAS; переменная LARIN_CERT_SHA256 (проверяются до сборки).
 
 on:
@@ -18,7 +18,7 @@ env:
   # Закреплённая версия Flutter: шаблон Android, compileSdk/targetSdk, AGP и Kotlin
   # меняются только при осознанной правке этой строки.
   FLUTTER_VERSION: '3.47.8'
-  # Ожидаемые разрешения в APK 1.8.2. Лишнее разрешение — предупреждение,
+  # Ожидаемые разрешения в APK 1.8.3. Лишнее разрешение — предупреждение,
   # «чувствительное» (SMS, звонки, контакты, местоположение) — ошибка сборки.
   EXPECTED_PERMISSIONS: >-
     android.permission.POST_NOTIFICATIONS
@@ -174,7 +174,7 @@ jobs:
             echo "::warning::Разрешения сверх ожидаемых:$EXTRA"
           fi
           if echo "$PERMS" | grep -Eq "$FORBIDDEN_PERMISSION_PATTERN"; then
-            echo "::error::В APK 1.8.2 попало чувствительное разрешение:"
+            echo "::error::В APK 1.8.3 попало чувствительное разрешение:"
             echo "$PERMS" | grep -E "$FORBIDDEN_PERMISSION_PATTERN"
             exit 1
           fi
@@ -182,7 +182,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Larin-Cold-Start-v1.8.2-APK
+          name: Larin-Cold-Start-v1.8.3-APK
           path: |
             larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
             apk-badging.txt
