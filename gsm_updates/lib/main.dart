@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.4';
+const appVersion = '1.7.5';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -128,6 +128,8 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   bool _smsGranted = false;
   PhoneState _phone = const PhoneState();
   int _setupHintUntil = 0;
+  /// Сколько раз плашку настройки скрывали: первый раз — на 7 дней, потом — навсегда.
+  int _setupHintDismissals = 0;
   String _maker = '';
   Timer? _tick;
   bool _confirming = false;
@@ -277,8 +279,17 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
   }
 
   Future<void> _hideSetupHint() async {
-    setState(() => _setupHintUntil = DateTime.now().add(const Duration(days: 7)).millisecondsSinceEpoch);
-    try { await _prefs.setInt('setupHintUntil', _setupHintUntil); } catch (_) {}
+    setState(() {
+      _setupHintDismissals++;
+      // Первый раз — на неделю; второй — навсегда (карточка в настройках остаётся).
+      _setupHintUntil = _setupHintDismissals >= 2
+          ? 8640000000000000
+          : DateTime.now().add(const Duration(days: 7)).millisecondsSinceEpoch;
+    });
+    try {
+      await _prefs.setInt('setupHintUntil', _setupHintUntil);
+      await _prefs.setInt('setupHintDismissals', _setupHintDismissals);
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -286,7 +297,10 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
       final garage = await _service.loadGarage();
       try { _snowOn = await _prefs.getBool('winterSnow') ?? true; } catch (_) { _snowOn = false; }
       try { themeMode.value = themeFromName(await _prefs.getString('themeMode')); } catch (_) {}
-      try { _setupHintUntil = await _prefs.getInt('setupHintUntil') ?? 0; } catch (_) {}
+      try {
+        _setupHintUntil = await _prefs.getInt('setupHintUntil') ?? 0;
+        _setupHintDismissals = await _prefs.getInt('setupHintDismissals') ?? 0;
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _cars = garage.cars;
@@ -690,10 +704,11 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
                 config: _config,
                 now: now,
                 setupHint: _cars.any((c) => c.deviceNumber.isNotEmpty) &&
-                    !setupComplete(setupSteps(_phone)) && now.millisecondsSinceEpoch > _setupHintUntil
+                    setupHintWanted(_phone) && now.millisecondsSinceEpoch > _setupHintUntil
                     ? _setupHintText(_phone) : null,
                 openSetup: () async { setState(() => _page = 1); },
                 hideSetup: _hideSetupHint,
+                hideLabel: _setupHintDismissals >= 1 ? 'Больше не показывать' : 'Не сейчас',
                 chooseCar: _chooseCar,
                 openMessages: _openMessages,
                 confirmPending: () => _confirmPending(manual: true),
@@ -780,6 +795,7 @@ class _HomeView extends StatelessWidget {
     required this.setupHint,
     required this.openSetup,
     required this.hideSetup,
+    required this.hideLabel,
     required this.chooseCar,
     required this.openMessages,
     required this.confirmPending,
@@ -793,6 +809,7 @@ class _HomeView extends StatelessWidget {
   final DateTime now;
   final String? setupHint;
   final Future<void> Function() openSetup, hideSetup;
+  final String hideLabel;
   final Future<void> Function() chooseCar, openMessages, reminder, confirmPending;
   final Future<void> Function(String) send;
   final Future<void> Function() call;
@@ -817,7 +834,7 @@ class _HomeView extends StatelessWidget {
         ],
         if (configured && setupHint != null && !replyOverdue(config, now)) ...[
           const SizedBox(height: 8),
-          _SetupHint(text: setupHint!, open: openSetup, hide: hideSetup),
+          _SetupHint(text: setupHint!, open: openSetup, hide: hideSetup, hideLabel: hideLabel),
         ],
         if (configured && replyOverdue(config, now)) ...[
           const SizedBox(height: 8),
@@ -1468,8 +1485,8 @@ class _ActionRow extends StatelessWidget {
 
 /// Плашка на главном экране: настройка телефона не закончена.
 class _SetupHint extends StatelessWidget {
-  const _SetupHint({required this.text, required this.open, required this.hide});
-  final String text;
+  const _SetupHint({required this.text, required this.open, required this.hide, required this.hideLabel});
+  final String text, hideLabel;
   final Future<void> Function() open, hide;
   @override
   Widget build(BuildContext context) {
@@ -1485,7 +1502,7 @@ class _SetupHint extends StatelessWidget {
           Expanded(child: Text(text, style: brandText(13, color: p.warnText, height: 1.35))),
         ]),
         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          TextButton(onPressed: hide, child: Text('Не сейчас', style: brandText(13, color: p.warnText))),
+          TextButton(onPressed: hide, child: Text(hideLabel, style: brandText(13, color: p.warnText))),
           const SizedBox(width: 4),
           FilledButton(onPressed: open, child: const Text('Настроить')),
         ]),

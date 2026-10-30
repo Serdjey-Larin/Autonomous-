@@ -141,3 +141,11 @@ List<SetupStep> setupSteps(PhoneState s) {
 
 int stepsDone(List<SetupStep> steps) => steps.where((s) => s.status == StepStatus.done).length;
 bool setupComplete(List<SetupStep> steps) => stepsDone(steps) == steps.length;
+
+/// Нужна ли плашка на главном экране. Если хоть раз пришло уведомление при
+/// закрытом приложении, фоновый приём доказанно работает — плашка не нужна,
+/// даже если какой-то шаг (например, батарея) остался жёлтым.
+bool setupHintWanted(PhoneState s) {
+  if (s.granted && s.bgReplyAt > 0) return false;
+  return !setupComplete(setupSteps(s));
+}

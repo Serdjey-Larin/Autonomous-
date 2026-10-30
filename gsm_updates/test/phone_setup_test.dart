@@ -49,4 +49,13 @@ void main() {
       'installer': 'ru.vk.store', 'bgReplyAt': 5, 'notifications': true, 'model': 'SM-A556'});
     expect(m.granted && m.battery && m.bgReplyAt == 5 && m.installer == 'ru.vk.store', isTrue);
   });
+
+  test('the home hint disappears once a background reply has arrived', () {
+    const pending = PhoneState(granted: true, manufacturer: 'samsung', sdk: 35);
+    expect(setupHintWanted(pending), isTrue);
+    const proven = PhoneState(granted: true, manufacturer: 'samsung', sdk: 35, bgReplyAt: 1);
+    expect(setupComplete(setupSteps(proven)), isFalse, reason: 'battery step is still yellow');
+    expect(setupHintWanted(proven), isFalse, reason: 'background replies demonstrably work');
+    expect(setupHintWanted(const PhoneState(granted: false, bgReplyAt: 1)), isTrue);
+  });
 }
