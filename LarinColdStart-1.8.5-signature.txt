@@ -1,0 +1,18 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v3.2 scheme (APK Signature Scheme v3.2): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+V2 Signer: certificate DN: CN=LARIN COLD, O=LARIN COLD, C=RU
+V2 Signer: certificate SHA-256 digest: bee4fb7c97b9c63e572ccc69c5b64dd4e1bd0babb8e3dfd2e4b2764a945eabb2
+V2 Signer: certificate SHA-1 digest: 7cf3db4fb8cad4af761cae40ab2d5f7a56f0833c
+V2 Signer: certificate MD5 digest: 8daffb3c000f636b56eb5282261679d1
+V2 Signer: key algorithm: RSA
+V2 Signer: key size (bits): 4096
+V2 Signer: public key SHA-256 digest: c8bd25aed569e2dae1697f4db99b4c9923166d79550009431d21ab545a0fd9f9
+V2 Signer: public key SHA-1 digest: 70bd35faaefa580f1901a4c2be7a6547147fe928
+V2 Signer: public key MD5 digest: 9fcec52db0a9561510e00aca5daae61e
