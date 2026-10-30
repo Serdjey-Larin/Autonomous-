@@ -172,7 +172,8 @@ class SmsReceiver : BroadcastReceiver() {
         val stored = SmsInbox.store(context, sender, body, parts.first().timestampMillis, System.currentTimeMillis())
         if (!stored) return
         SmsInbox.listener?.invoke()
-        if (!SmsInbox.foreground) {
+        // Список номеров (ответ на ACCLIMLIST) показываем уведомлением всегда — и при открытом приложении.
+        if (!SmsInbox.foreground || ReplyNotifier.isUserList(body)) {
             try { ReplyNotifier.handle(context, SmsInbox.normalize(sender), body,
                 parts.first().timestampMillis, System.currentTimeMillis()) } catch (_: Exception) { }
         }
@@ -223,6 +224,19 @@ object ReplyNotifier {
         }
     }
 
+    private val userList = Regex("""^\s*MASTER\s*:""", RegexOption.IGNORE_CASE)
+    fun isUserList(body: String) = userList.containsMatchIn(body)
+
+    /** «MASTER: +7…\nEXTRA 1: +7…» → «Мастер: +7…\nДоп. 1: +7…». */
+    private fun userListText(body: String): String = body.trim().lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n") { row ->
+        when {
+            row.startsWith("MASTER", true) -> "Мастер: " + row.substringAfter(':').trim()
+            row.replace(" ", "").equals("EXTRA:none", true) -> "Дополнительных номеров нет"
+            row.startsWith("EXTRA", true) -> "Доп. " + row.substring(5).substringBefore(':').trim() + ": " + row.substringAfter(':').trim()
+            else -> row
+        }
+    }
+
     private const val SKEW = 20_000L
     private const val REPLY_WINDOW = 15 * 60_000L
 
@@ -259,7 +273,11 @@ object ReplyNotifier {
         val vNum = battery.find(text)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
         val validStatus = h != null && l != null && cycle != null && cycle in 1..240 &&
             (vNum == null || vNum in 5.0..18.0) && !(h.groupValues[1].equals("on", true) && l > cycle)
-        if (validStatus) {
+        val list = isUserList(text)
+        if (list) {
+            title = "$name · разрешённые номера"
+            line = userListText(text)
+        } else if (validStatus) {
             val on = h!!.groupValues[1].equals("on", true)
             val leftMin = l ?: 0
             val v = battery.find(text)?.groupValues?.get(1)?.replace('.', ',')
@@ -343,9 +361,9 @@ object ReplyNotifier {
             .setStyle(Notification.BigTextStyle().bigText(line)).setAutoCancel(true).setContentIntent(tap)
             .setCategory(Notification.CATEGORY_STATUS).build()
         try {
-            nm.notify("reply_$id", 2, n)
+            nm.notify(if (list) "list_$id" else "reply_$id", 2, n)
             // Фоновый путь работает: приложение было закрыто, а SMS обработано и показано.
-            SmsInbox.prefs(c).edit().putLong("bgReplyAt", System.currentTimeMillis()).apply()
+            if (!SmsInbox.foreground) SmsInbox.prefs(c).edit().putLong("bgReplyAt", System.currentTimeMillis()).apply()
         } catch (_: SecurityException) { }
     }
 }

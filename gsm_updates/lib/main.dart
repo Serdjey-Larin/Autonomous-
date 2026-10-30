@@ -18,7 +18,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.9';
+const appVersion = '1.8.0';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -1255,7 +1255,7 @@ class _SettingsView extends StatelessWidget {
       ],
       _SectionCard(title: 'Разрешённые номера', icon: Icons.groups_outlined,
         child: Column(children: [
-          _ActionRow(title: 'Список пользователей', description: 'ACCLIMLIST',
+          _ActionRow(title: 'Список пользователей',
             icon: Icons.list_alt, onTap: () => manageNumber('list')),
           _ActionRow(title: 'Добавить номер', description: 'До трёх дополнительных',
             icon: Icons.person_add_alt, onTap: () => manageNumber('add')),
@@ -1449,10 +1449,10 @@ class _DetailLine extends StatelessWidget {
 }
 
 class _ActionRow extends StatelessWidget {
-  const _ActionRow({required this.title, required this.description,
+  const _ActionRow({required this.title, this.description,
     required this.icon, required this.onTap});
   final String title;
-  final String description;
+  final String? description;
   final IconData icon;
   final VoidCallback onTap;
   @override
@@ -1462,7 +1462,7 @@ class _ActionRow extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: p.accent),
       title: Text(title, style: brandText(14, color: p.text)),
-      subtitle: Text(description, style: brandText(11, color: p.muted, weight: FontWeight.w500)),
+      subtitle: description == null ? null : Text(description!, style: brandText(11, color: p.muted, weight: FontWeight.w500)),
       trailing: Icon(Icons.chevron_right_rounded, color: p.muted),
       onTap: onTap,
     ));
