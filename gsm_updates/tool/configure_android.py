@@ -107,10 +107,17 @@ if 'abiFilters' not in g:
     g = g.replace('android {', 'android {\n    packaging { jniLibs { excludes += listOf("lib/x86/**", "lib/x86_64/**") } }', 1)
     gradle_file.write_text(g)
 assert 'abiFilters' in gradle_file.read_text()
+import re
+# Имя пакета в магазине (RuStore): короткое и постоянное. Пространство имён Kotlin
+# (namespace) остаётся ru.larincold.larin_cold_gsm_control — пользователю оно не видно.
+g = gradle_file.read_text()
+g = re.sub(r'applicationId\s*=\s*"[^"]+"', 'applicationId = "ru.larincold.start"', g)
+gradle_file.write_text(g)
+assert 'applicationId = "ru.larincold.start"' in gradle_file.read_text()
 pub = root/'pubspec.yaml'
 s = pub.read_text()
 import re
-pub.write_text(re.sub(r'^version:.*$', 'version: 1.8.4+184', s, flags=re.M))
+pub.write_text(re.sub(r'^version:.*$', 'version: 1.8.5+185', s, flags=re.M))
 assert any(e.get(ns+'name') == 'android.permission.RECEIVE_SMS' for e in m.findall('uses-permission'))
 assert not any(e.get(ns+'name') == 'android.permission.READ_SMS' for e in m.findall('uses-permission'))
 assert m.find("./application/receiver[@{0}name='.SmsReceiver']".format(ns)).get(ns+'permission') == 'android.permission.BROADCAST_SMS'
