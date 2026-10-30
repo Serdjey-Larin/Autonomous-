@@ -111,6 +111,7 @@ ApplyResult applyReply(VehicleConfig car, InboundSms sms) {
       }
       car.basis = 'status';
       car.outAlready = s.already;
+      car.outIgnored = s.ignored;
       // STATUS в ответ на отправленную команду: её отправка и приём подтверждены.
       final pend = car.pendingCommand;
       if (pend != null && sms.answers(car.pendingSince) &&
@@ -238,22 +239,22 @@ bool _runningByStatus(VehicleConfig car, DateTime now) =>
 bool afterCall(VehicleConfig car) =>
     car.callAt != null && (car.outAt == null || car.callAt! > car.outAt!);
 
+/// Звонок был недавно (10 мин), а STATUS после него ещё не пришёл.
+/// Прошивка v1.5.6+ присылает STATUS звонившему через несколько секунд.
+const callReplyWindow = Duration(minutes: 10);
+bool callRecent(VehicleConfig car, DateTime now) =>
+    afterCall(car) && now.millisecondsSinceEpoch - car.callAt! <= callReplyWindow.inMilliseconds;
+
 /// Выход включён по свежему STATUS — только тогда показываем «работу» цветом.
 bool confirmedOn(VehicleConfig car, DateTime now) =>
-    _runningByStatus(car, now) && statusFresh(car, now) && car.basis == 'status' && !afterCall(car);
+    _runningByStatus(car, now) && statusFresh(car, now) && car.basis == 'status' && !callRecent(car, now);
 
-/// Пользователь позвонил на модуль: звонок переключает выход, поэтому прежний
-/// расчётный отсчёт больше не верен. Точное время даст ответ на STATUS.
+/// Пользователь открыл номеронабиратель для звонка на модуль. Состоялся ли
+/// вызов, приложение не знает (журнал звонков не читаем), поэтому прежний
+/// таймер и сигнал НЕ сбрасываются: состояние изменит только STATUS после звонка.
 void applyCall(VehicleConfig car, DateTime now) {
   car.callAt = now.millisecondsSinceEpoch;
   car.cmdAt = car.callAt;
-  car.endMs = null;
-  car.startMs = null;
-  car.basis = null;
-  car.awaitCmd = null;
-  car.awaitSince = null;
-  car.ackCmd = null;
-  car.ackAt = null;
 }
 
 /// Отказ модуля показываем 30 минут, пока после него не пришёл новый ответ.
@@ -285,7 +286,7 @@ bool waitingReply(VehicleConfig car, DateTime now) {
   final limit = replyTimeout.inMilliseconds;
   if (car.pendingCommand != null && car.pendingSince != null) return nowMs - car.pendingSince! <= limit;
   if (car.awaitCmd != null && car.awaitSince != null) return nowMs - car.awaitSince! <= limit;
-  return false;
+  return callRecent(car, now);
 }
 
 StatusTone statusTone(VehicleConfig car, DateTime now) {
@@ -293,7 +294,6 @@ StatusTone statusTone(VehicleConfig car, DateTime now) {
   if (waitingReply(car, now)) return StatusTone.waiting;
   if (car.pendingCommand != null || car.awaitCmd != null) return StatusTone.warning;
   if (_recentError(car, now)) return StatusTone.warning;
-  if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) return StatusTone.warning;
   if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
     // «Модуль принял запуск» зелёный, только пока не вышло время цикла.
     if (car.ackCmd == 'START') {
@@ -326,9 +326,7 @@ String statusLine(VehicleConfig car, DateTime now) {
     return 'Ответа на ${commandTitle(await_)} нет · проверьте переписку';
   }
   if (_recentError(car, now)) return 'Модуль отклонил: ${car.errorText}';
-  if (afterCall(car) && nowMs - car.callAt! <= const Duration(hours: 2).inMilliseconds) {
-    return 'Звонок переключил прогрев · обновите состояние';
-  }
+  if (callRecent(car, now)) return 'После звонка ждём ответ модуля';
   if (car.ackCmd != null && car.ackAt != null && (car.outAt == null || car.ackAt! > car.outAt!)) {
     if (car.ackCmd == 'START' && (car.endMs == null || car.endMs! <= nowMs)) return 'Прогрев завершён по таймеру';
     return car.ackCmd == '?' ? 'Модуль ответил OK' : 'Модуль принял ${commandTitle(car.ackCmd!)}';
@@ -336,9 +334,11 @@ String statusLine(VehicleConfig car, DateTime now) {
   if (car.outState != null && car.outAt != null) {
     if (statusFresh(car, now)) {
       if (_runningByStatus(car, now)) {
+        if (car.outIgnored) return 'Старая команда не выполнена · прогрев идёт';
         return '${car.outAlready ? 'Прогрев уже идёт' : 'Прогрев запущен'} · SMS в ${_clock(car.outAt!)}';
       }
       if (car.outState == 'on') return 'Прогрев завершён по таймеру';
+      if (car.outIgnored) return 'Старая команда не выполнена · прогрев выключен';
       return '${car.outAlready ? 'Прогрев уже выключен' : 'Прогрев выключен'} · SMS в ${_clock(car.outAt!)}';
     }
     return 'Данные от ${_dayClock(car.outAt!)} устарели · обновите состояние';
@@ -384,7 +384,6 @@ bool replyOverdue(VehicleConfig car, DateTime now) {
       since != null && nowMs - since > after.inMilliseconds && nowMs - since <= const Duration(hours: 2).inMilliseconds;
   if (car.pendingCommand != null && late(car.pendingSince, const Duration(minutes: 5))) return true;
   if (car.awaitCmd != null && late(car.awaitSince, const Duration(minutes: 5))) return true;
-  if (afterCall(car) && late(car.callAt, const Duration(minutes: 3))) return true;
   return false;
 }
 

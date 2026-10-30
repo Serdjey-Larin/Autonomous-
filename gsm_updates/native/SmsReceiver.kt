@@ -55,6 +55,7 @@ object SmsInbox {
             (car["pending"] as? String)?.let { row.put("pending", it) }
             (car["pendingSince"] as? Number)?.let { row.put("pendingSince", it.toLong()) }
             (car["cmdAt"] as? Number)?.let { row.put("cmdAt", it.toLong()) }
+            (car["outAt"] as? Number)?.let { row.put("outAt", it.toLong()) }
             info.put(row)
         }
         synchronized(lock) {
@@ -71,6 +72,19 @@ object SmsInbox {
                 if (r.optString("number") == number) return r
             }
             return null
+        }
+    }
+
+    /** Принят STATUS в фоне: запомнить его время, чтобы более старый его не перебил. */
+    fun setOutAt(c: Context, number: String, at: Long) {
+        synchronized(lock) {
+            val p = prefs(c)
+            val rows = try { JSONArray(p.getString("cars", "[]")) } catch (_: Exception) { return }
+            for (i in 0 until rows.length()) {
+                val r = rows.getJSONObject(i)
+                if (r.optString("number") == number) r.put("outAt", at)
+            }
+            p.edit().putString("cars", rows.toString()).commit()
         }
     }
 
@@ -177,6 +191,7 @@ object ReplyNotifier {
     private val heater = Regex("""heater\s*:\s*(on|off)""", RegexOption.IGNORE_CASE)
     private val left = Regex("""left\s*:\s*(\d{1,3})\s*min""", RegexOption.IGNORE_CASE)
     private val time = Regex("""time\s*:\s*(\d{1,3})\s*min""", RegexOption.IGNORE_CASE)
+    private val ignored = Regex("""old command ignored""", RegexOption.IGNORE_CASE)
     private val battery = Regex("""battery\s*:\s*(\d{1,2}[.,]\d)\s*v""", RegexOption.IGNORE_CASE)
     private val balanceHint = Regex("""^USSD\s*:|balans|баланс|balance""", RegexOption.IGNORE_CASE)
     private val amount = Regex("""(-?\d+(?:[.,]\d{1,2})?)\s*(?:rub|rur|руб|р(?![а-яё])|₽)""", RegexOption.IGNORE_CASE)
@@ -237,23 +252,43 @@ object ReplyNotifier {
         val err = errorText(text)
         var title: String
         var line: String
-        if (h != null) {
-            val on = h.groupValues[1].equals("on", true)
+        // Те же проверки формата, что parseReply в Dart: Left и Time обязательны,
+        // Left не больше Time при ON, Time 1–240, напряжение 5–18 В.
+        val l = left.find(text)?.groupValues?.get(1)?.toIntOrNull()
+        val cycle = time.find(text)?.groupValues?.get(1)?.toIntOrNull()
+        val vNum = battery.find(text)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+        val validStatus = h != null && l != null && cycle != null && cycle in 1..240 &&
+            (vNum == null || vNum in 5.0..18.0) && !(h.groupValues[1].equals("on", true) && l > cycle)
+        if (validStatus) {
+            val on = h!!.groupValues[1].equals("on", true)
+            val leftMin = l ?: 0
             val v = battery.find(text)?.groupValues?.get(1)?.replace('.', ',')
-            val l = left.find(text)?.groupValues?.get(1)?.toIntOrNull()
-            val cycle = time.find(text)?.groupValues?.get(1)?.toIntOrNull()
             val volts = if (v != null) "АКБ $v В" else ""
+            // Не новее уже принятого STATUS — задержанный старый ответ: ничего не меняем и не показываем.
+            val outAt = if (car != null && car.has("outAt")) car.optLong("outAt") else null
+            if (outAt != null && at <= outAt) return
             // STATUS, сформированный до последней команды, устарел для таймера.
             val stale = cmdMark != null && at < cmdMark - SKEW
-            if (!stale && pending != null && answers(pendingSince)) SmsInbox.consumePending(c, number)
-            if (on && l != null && l > 0 && (cycle == null || l <= cycle)) {
-                title = if (already.containsMatchIn(text)) "$name · прогрев уже идёт" else "$name · прогрев запущен"
-                line = listOf("Осталось $l мин", volts).filter { it.isNotEmpty() }.joinToString(" · ")
-                if (!stale) scheduleEnd(at + l * 60_000L)
+            if (!stale) {
+                SmsInbox.setOutAt(c, number, at)
+                if (pending != null && answers(pendingSince)) SmsInbox.consumePending(c, number)
+            }
+            val oldCmd = ignored.containsMatchIn(text)
+            if (on && leftMin > 0) {
+                title = when {
+                    oldCmd -> "$name · старая команда не выполнена"
+                    already.containsMatchIn(text) -> "$name · прогрев уже идёт"
+                    else -> "$name · прогрев запущен"
+                }
+                line = listOf("Осталось $leftMin мин", volts).filter { it.isNotEmpty() }.joinToString(" · ")
+                if (!stale) scheduleEnd(at + leftMin * 60_000L)
             } else {
-                title = if (already.containsMatchIn(text)) "$name · прогрев уже выключен" else "$name · прогрев выключен"
-                line = listOf(if (cycle != null) "Время прогрева $cycle мин" else "", volts)
-                    .filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "Модуль ответил на запрос состояния." }
+                title = when {
+                    oldCmd -> "$name · старая команда не выполнена"
+                    already.containsMatchIn(text) -> "$name · прогрев уже выключен"
+                    else -> "$name · прогрев выключен"
+                }
+                line = listOf("Время прогрева $cycle мин", volts).filter { it.isNotEmpty() }.joinToString(" · ")
                 if (!stale && !on && id.isNotEmpty()) Alerts.cancel(c, timerKey())
             }
         } else if (text.equals("OK", true) || text.equals("OK.", true)) {

@@ -164,12 +164,15 @@ void main() {
       expect(VehicleConfig.fromJson(car.toJson()).balanceRub, 13);
     });
 
-    test('a call resets the estimate until STATUS shows the real timer', () {
+    test('a call keeps the old timer until STATUS after the call shows the real one', () {
       final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233', durationMinutes: 30);
       applyReply(car, sms(1, '+79281050233', statusOff, t0));
       applyCall(car, t0.add(const Duration(minutes: 1)));
-      expect(car.endMs, isNull);
-      expect(statusLine(car, t0.add(const Duration(minutes: 2))), 'Звонок переключил прогрев · обновите состояние');
+      expect(car.outState, 'off', reason: 'opening the dialer is not proof of a call');
+      expect(statusLine(car, t0.add(const Duration(minutes: 2))), 'После звонка ждём ответ модуля');
+      expect(statusTone(car, t0.add(const Duration(minutes: 2))), StatusTone.waiting);
+      expect(statusLine(car, t0.add(const Duration(minutes: 12))), startsWith('Прогрев выключен'),
+          reason: 'cancelled call: after 10 min the last known state is shown again');
       applyReply(car, sms(2, '+79281050233', statusOn, t0.add(const Duration(minutes: 3))));
       expect(afterCall(car), isFalse);
       expect(car.endMs, t0.add(const Duration(minutes: 3)).millisecondsSinceEpoch + 14 * 60000);
@@ -286,9 +289,8 @@ void main() {
       applyReply(car, sms(1, '+79281050233', statusOn, t0.add(const Duration(minutes: 7))));
       expect(replyOverdue(car, t0.add(const Duration(minutes: 8))), isFalse);
       applyCall(car, t0.add(const Duration(minutes: 10)));
-      expect(replyOverdue(car, t0.add(const Duration(minutes: 12))), isFalse);
-      expect(replyOverdue(car, t0.add(const Duration(minutes: 14))), isTrue);
-      expect(replyOverdue(car, t0.add(const Duration(hours: 3))), isFalse);
+      expect(replyOverdue(car, t0.add(const Duration(minutes: 14))), isFalse,
+          reason: 'a call may have been cancelled in the dialer: no «module silent» alarm');
     });
     test('winter snow season is 1 December – 30 January', () {
       expect(isWinterSeason(DateTime(2026, 11, 30)), isFalse);
@@ -384,6 +386,30 @@ void main() {
       expect(car.outState, isNull);
       expect(car.endMs, isNull);
       expect(statusLine(car, t0.add(m(1))), 'Готов к запуску');
+    });
+  });
+
+  group('1.7.3: звонок и устаревшие команды', () {
+    final t0 = DateTime(2026, 10, 30, 7, 0);
+    test('открытие номеронабирателя не сбрасывает идущий отсчёт', () {
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, smsAt(1, statusOn, t0, t0.add(const Duration(seconds: 5))));
+      final end = car.endMs;
+      applyCall(car, t0.add(const Duration(minutes: 2)));
+      expect(car.endMs, end);
+      expect(confirmedOn(car, t0.add(const Duration(minutes: 3))), isFalse);
+      expect(confirmedOn(car, t0.add(const Duration(minutes: 13))), isTrue);
+    });
+    test('«Old command ignored» показывается понятным текстом', () {
+      const ignored = 'LARIN COLD\nOld command ignored\nHeater: OFF\nLeft: 0 min\nBattery: 14.6 V\nTime: 30 min';
+      final p = parseReply(ignored);
+      expect(p.kind, ReplyKind.status);
+      expect(p.status!.ignored, isTrue);
+      expect(p.status!.already, isFalse);
+      final car = VehicleConfig(id: 'a', deviceNumber: '+79281050233');
+      applyReply(car, smsAt(1, ignored, t0, t0.add(const Duration(seconds: 5))));
+      expect(statusLine(car, t0.add(const Duration(minutes: 1))), 'Старая команда не выполнена · прогрев выключен');
+      expect(VehicleConfig.fromJson(car.toJson()).outIgnored, isTrue);
     });
   });
 }

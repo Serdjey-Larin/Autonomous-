@@ -16,11 +16,13 @@ enum ReplyKind { status, ok, balance, error, other, invalid }
 
 class StatusReply {
   const StatusReply({required this.on, required this.leftMinutes,
-      required this.timeMinutes, this.battery, this.already = false});
+      required this.timeMinutes, this.battery, this.already = false, this.ignored = false});
   final bool on;
   /// Ответ на START при уже работающем отопителе (или STOP при выключенном):
   /// строка «Already running» / «Already stopped» над обычным STATUS.
   final bool already;
+  /// Прошивка v1.5.7 не выполнила устаревшую команду: строка «Old command ignored».
+  final bool ignored;
   final int leftMinutes;
   final int timeMinutes;
   final double? battery;
@@ -40,6 +42,7 @@ class ParsedReply {
 
 final _heater = RegExp(r'Heater\s*:\s*(ON|OFF)\b', caseSensitive: false);
 final _already = RegExp(r'\balready\b|уже', caseSensitive: false);
+final _ignored = RegExp(r'old command ignored', caseSensitive: false);
 final _left = RegExp(r'Left\s*:\s*(\d{1,3})\s*min', caseSensitive: false);
 final _time = RegExp(r'Time\s*:\s*(\d{1,3})\s*min', caseSensitive: false);
 // Ответ на BALANCE: модуль пересылает USSD-ответ оператора, например
@@ -111,7 +114,7 @@ ParsedReply parseReply(String body) {
   }
   return ParsedReply(ReplyKind.status, status: StatusReply(
       on: on, leftMinutes: on ? leftMin : 0, timeMinutes: timeMin, battery: battery,
-      already: _already.hasMatch(text)));
+      already: _already.hasMatch(text), ignored: _ignored.hasMatch(text)));
 }
 
 /// Канонический вид номера: +E.164. Совпадает с SmsInbox.normalize в Kotlin.

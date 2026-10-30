@@ -17,7 +17,7 @@ void main() {
   runApp(const LarinGsmApp());
 }
 
-const appVersion = '1.7.2';
+const appVersion = '1.7.3';
 
 /// Политика конфиденциальности (та же ссылка — в карточке RuStore).
 const privacyPolicyUrl =
@@ -182,7 +182,7 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
         for (final c in _cars)
           if (c.deviceNumber.isNotEmpty) (number: c.deviceNumber, id: c.id, name: c.vehicleName,
             pending: c.pendingCommand, pendingSince: c.pendingSince, cmdAt: c.cmdAt,
-            duration: c.durationMinutes),
+            duration: c.durationMinutes, outAt: c.outAt),
       ]);
     } catch (_) {}
   }
@@ -459,12 +459,12 @@ class _ControlShellState extends State<ControlShell> with WidgetsBindingObserver
     try {
       final car = _config;
       await _service.call(car.deviceNumber);
+      // Таймер и сигнал не трогаем: состоялся ли звонок, узнаем из STATUS модуля.
       applyCall(car, DateTime.now());
-      await _alerts.cancel('timer_${car.id}');
       await _persist();
       _notice(_smsGranted
-          ? 'После звонка нажмите ⟳ рядом с состоянием — таймер покажет точное время.'
-          : 'После звонка отправьте STATUS и посмотрите ответ в переписке.');
+          ? 'После звонка модуль пришлёт состояние — таймер обновится сам.'
+          : 'После звонка модуль пришлёт состояние SMS — посмотрите его в переписке.');
     } catch (e) {
       _notice('$e', error: true);
     }
@@ -1251,7 +1251,7 @@ class _SettingsView extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Larin Cold Start · приложение $appVersion', style: brandItalic(15, color: p.text, weight: FontWeight.w800)),
           const SizedBox(height: 7),
-          Text('Совместимо с прошивкой LARIN COLD GSM START v1.5.6 (и v1.5.5). '
+          Text('Совместимо с прошивкой LARIN COLD GSM START v1.5.7 (и v1.5.5–v1.5.6). '
             'Интернет и сервер не требуются. Расходуется обычный пакет SMS и звонков.', style: small),
           const SizedBox(height: 9),
           Text('Приложение читает только SMS с номеров модулей (если приём ответов включён), '

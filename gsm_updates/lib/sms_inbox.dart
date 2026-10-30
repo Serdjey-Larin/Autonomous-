@@ -18,11 +18,12 @@ class SmsInboxBridge {
   /// Номера модулей (фильтр приёма), названия машин и ожидаемая команда —
   /// чтобы при закрытом приложении фоновая часть вела таймер так же, как экран.
   Future<void> setDevices(List<({String number, String id, String name, String? pending,
-      int? pendingSince, int? cmdAt, int duration})> cars) =>
+      int? pendingSince, int? cmdAt, int duration, int? outAt})> cars) =>
       channel.invokeMethod<void>('setDevices', {
         'numbers': [for (final c in cars) c.number],
         'cars': [for (final c in cars) {'number': c.number, 'id': c.id, 'name': c.name,
-          'pending': c.pending, 'pendingSince': c.pendingSince, 'cmdAt': c.cmdAt, 'duration': c.duration}],
+          'pending': c.pending, 'pendingSince': c.pendingSince, 'cmdAt': c.cmdAt, 'duration': c.duration,
+          'outAt': c.outAt}],
       });
 
   /// Удалить из журнала всё, что пришло с этого номера (машина удалена или номер сменён).
