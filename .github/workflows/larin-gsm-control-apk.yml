@@ -1,8 +1,10 @@
 name: LARIN COLD GSM Control — APK из ZIP
+# rev 1.8.5
+# Подпись: секреты LARIN_KEYSTORE_BASE64, LARIN_KEYSTORE_PASSWORD, LARIN_KEY_ALIAS; переменная LARIN_CERT_SHA256 (проверяются до сборки).
 
 on:
   push:
-    branches: [larin-gsm-control-build]
+    branches: [larin-gsm-control-build, larin-gsm-signing-probe, larin-gsm-sms-receive]
     paths:
       - 'LARIN_COLD_GSM_Control_GitHub_Mini_0.1.1.zip'
       - '.github/workflows/larin-gsm-control-apk.yml'
@@ -12,9 +14,27 @@ on:
 permissions:
   contents: read
 
+env:
+  # Закреплённая версия Flutter: шаблон Android, compileSdk/targetSdk, AGP и Kotlin
+  # меняются только при осознанной правке этой строки.
+  FLUTTER_VERSION: '3.47.8'
+  # Ожидаемые разрешения в APK 1.8.5. Лишнее разрешение — предупреждение,
+  # «чувствительное» (SMS, звонки, контакты, местоположение) — ошибка сборки.
+  EXPECTED_PERMISSIONS: >-
+    android.permission.POST_NOTIFICATIONS
+    android.permission.SCHEDULE_EXACT_ALARM
+    android.permission.RECEIVE_BOOT_COMPLETED
+    android.permission.VIBRATE
+    android.permission.RECEIVE_SMS
+    ru.larincold.start.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+  # RECEIVE_SMS разрешён (приём ответов модуля); чтение и отправка SMS — нет.
+  FORBIDDEN_PERMISSION_PATTERN: 'READ_SMS|SEND_SMS|RECEIVE_MMS|WAP_PUSH|CALL_LOG|READ_PHONE|READ_CONTACTS|LOCATION|BIND_NOTIFICATION_LISTENER|BIND_ACCESSIBILITY'
+
 jobs:
   android:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # только для публикации готового APK в служебную ветку apk-builds
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -26,11 +46,34 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Flutter stable
+      - name: Flutter ${{ env.FLUTTER_VERSION }}
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+
+      - name: Release key — обязателен
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LARIN_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LARIN_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LARIN_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::Не заданы секреты LARIN_KEYSTORE_BASE64 / LARIN_KEYSTORE_PASSWORD / LARIN_KEY_ALIAS. Сборка со случайным ключом запрещена."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/larin"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/larin/release.p12"
+          PW=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')
+          AL=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')
+          if ! keytool -list -keystore "$RUNNER_TEMP/larin/release.p12" -storetype PKCS12 -storepass "$PW" -alias "$AL" >/dev/null 2>&1; then
+            echo "::error::Ключ не открывается: проверьте секреты LARIN_KEYSTORE_PASSWORD (пароль из LARIN_SIGNING_SECRETS.txt) и LARIN_KEY_ALIAS (larin), а также что LARIN_KEYSTORE_BASE64 вставлен целиком."
+            exit 1
+          fi
+          echo "Ключ подписи открывается, имя ключа найдено."
+          echo "LARIN_KEYSTORE_PATH=$RUNNER_TEMP/larin/release.p12" >> "$GITHUB_ENV"
 
       - name: Unpack original LARIN COLD source
         shell: bash
@@ -57,18 +100,117 @@ jobs:
 
       - name: Run Dart tests
         working-directory: larin_gsm_control
+        shell: bash
         run: |
           rm -f test/widget_test.dart # template references MyApp, not our real app
-          flutter test
+          set +e
+          flutter test --reporter expanded 2>&1 | tee ../dart-test.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then python3 ../.github/annotate_failure.py ../dart-test.log "Dart tests"; exit "$rc"; fi
 
       - name: Build release APK
         working-directory: larin_gsm_control
-        run: flutter build apk --release
+        env:
+          LARIN_KEYSTORE_PASSWORD: ${{ secrets.LARIN_KEYSTORE_PASSWORD }}
+          LARIN_KEY_ALIAS: ${{ secrets.LARIN_KEY_ALIAS }}
+          LARIN_KEY_PASSWORD: ${{ secrets.LARIN_KEYSTORE_PASSWORD }}
+        shell: bash
+        run: |
+          set +e
+          # RuStore: только ARM-телефоны (меньше размер), код Dart обфусцирован,
+          # символы для расшифровки сбоев — отдельным артефактом.
+          flutter build apk --release --target-platform android-arm,android-arm64 \
+            --obfuscate --split-debug-info=build/symbols 2>&1 | tee ../apk-build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then python3 ../.github/annotate_failure.py ../apk-build.log "APK build"; exit "$rc"; fi
+
+      - name: Проверка APK — подпись, разрешения, SDK
+        shell: bash
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.LARIN_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          APK=larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/aapt2" dump badging "$APK" > apk-badging.txt
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > apk-signature.txt
+          CERT=$(grep -m1 'certificate SHA-256 digest' apk-signature.txt | awk '{print $NF}' | tr 'A-F' 'a-f')
+          PERMS=$(grep "^uses-permission:" apk-badging.txt | sed -E "s/.*name='([^']+)'.*/\1/" | sort -u)
+          {
+            echo "## Larin Cold Start — проверка APK"
+            echo
+            echo '```'
+            grep -E "^package:|^sdkVersion|^targetSdkVersion" apk-badging.txt
+            echo
+            echo "certificate SHA-256: $CERT"
+            echo
+            echo "Разрешения:"
+            echo "$PERMS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^package:|Sdk|uses-permission" apk-badging.txt || true
+          cat apk-signature.txt
+          # RuStore не принимает отладочные сборки.
+          if grep -q "application-debuggable" apk-badging.txt; then
+            echo "::error::APK помечен как debuggable"; exit 1
+          fi
+          grep -m1 "native-code" apk-badging.txt || true
+          if grep -q "Android Debug" apk-signature.txt; then
+            echo "::error::APK подписан debug-ключом"; exit 1
+          fi
+          if [ -n "${EXPECTED_CERT_SHA256:-}" ]; then
+            EXP=$(echo "$EXPECTED_CERT_SHA256" | tr -d ': ' | tr 'A-F' 'a-f')
+            if [ "$CERT" != "$EXP" ]; then
+              echo "::error::Сертификат APK ($CERT) не совпадает с LARIN_CERT_SHA256 ($EXP)"; exit 1
+            fi
+          else
+            echo "::warning::Переменная LARIN_CERT_SHA256 не задана — сертификат не сверяется."
+          fi
+          EXTRA=""
+          for p in $PERMS; do
+            case " $EXPECTED_PERMISSIONS " in *" $p "*) ;; *) EXTRA="$EXTRA $p";; esac
+          done
+          if [ -n "$EXTRA" ]; then
+            echo "::warning::Разрешения сверх ожидаемых:$EXTRA"
+          fi
+          if echo "$PERMS" | grep -Eq "$FORBIDDEN_PERMISSION_PATTERN"; then
+            echo "::error::В APK 1.8.5 попало чувствительное разрешение:"
+            echo "$PERMS" | grep -E "$FORBIDDEN_PERMISSION_PATTERN"
+            exit 1
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LARIN-COLD-GSM-Control-v1.4.9-APK
-          path: larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
+          name: Larin-Cold-Start-v1.8.5-APK
+          path: |
+            larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk
+            apk-badging.txt
+            apk-signature.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish APK to apk-builds branch
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version:' larin_gsm_control/pubspec.yaml | sed -E 's/version: *([^+]+).*/\1/')
+          mkdir -p "$RUNNER_TEMP/apkpub"
+          cp larin_gsm_control/build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/apkpub/LarinColdStart-$VERSION.apk"
+          cp apk-signature.txt "$RUNNER_TEMP/apkpub/LarinColdStart-$VERSION-signature.txt"
+          (cd larin_gsm_control/build && zip -qr "$RUNNER_TEMP/apkpub/LarinColdStart-$VERSION-symbols.zip" symbols)
+          cd "$RUNNER_TEMP/apkpub"
+          git init -q
+          git checkout -q -b apk-builds
+          git add .
+          git -c user.name="LARIN GSM CI" -c user.email="ci@larincold.invalid" commit -q -m "APK $VERSION from $GITHUB_REF_NAME@${GITHUB_SHA::7}"
+          # Ветка содержит только последний APK: история перезаписывается, репозиторий не разрастается.
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
+          echo "APK $VERSION опубликован в ветке apk-builds" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove key from runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/larin"
